@@ -1,10 +1,8 @@
-package droptailer
+package audittailer
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
-	"path"
 	"time"
 
 	"github.com/txn2/txeh"
@@ -16,16 +14,16 @@ import (
 )
 
 const (
-	namespace               = "firewall"
-	secretName              = "droptailer-client"
-	secretKeyCertificate    = "droptailer-client.crt"
-	secretKeyCertificateKey = "droptailer-client.key"
-	secretKeyCaCertificate  = "ca.crt"
-	defaultCertificateBase  = "/etc/droptailer-client"
+	namespace = "kube-system"
+	// secretName              = "audittailer-client"
+	// secretKeyCertificate    = "audittailer-client.crt"
+	// secretKeyCertificateKey = "audittailer-client.key"
+	// secretKeyCaCertificate  = "ca.crt"
+	defaultCertificateBase = "/etc/audittailer-client"
 )
 
-// DropTailer is responsible to deploy and watch the droptailer service
-type DropTailer struct {
+// AuditTailer is responsible to deploy and watch the audittailer service
+type AuditTailer struct {
 	client          k8s.Interface
 	logger          *zap.SugaredLogger
 	podname         string
@@ -35,8 +33,8 @@ type DropTailer struct {
 	certificateBase string
 }
 
-// NewDropTailer creates a new DropTailer
-func NewDropTailer(logger *zap.SugaredLogger, client k8s.Interface) (*DropTailer, error) {
+// NewAuditTailer creates a new AuditTailer
+func NewAuditTailer(logger *zap.SugaredLogger, client k8s.Interface) (*AuditTailer, error) {
 	hosts, err := txeh.NewHostsDefault()
 	if err != nil {
 		return nil, fmt.Errorf("unable to create hosts editor:%w", err)
@@ -45,18 +43,18 @@ func NewDropTailer(logger *zap.SugaredLogger, client k8s.Interface) (*DropTailer
 	if certificateBase == "" {
 		certificateBase = defaultCertificateBase
 	}
-	return &DropTailer{
+	return &AuditTailer{
 		client:          client,
 		logger:          logger,
-		podname:         "droptailer",
+		podname:         "kubernetes-audit-tailer",
 		namespace:       namespace,
 		hosts:           hosts,
 		certificateBase: certificateBase,
 	}, nil
 }
 
-// WatchServerIP watches the droptailer-server pod ip and updates /etc/hosts
-func (d *DropTailer) WatchServerIP() {
+// WatchServerIP watches the audittailer-server pod ip and updates /etc/hosts
+func (d *AuditTailer) WatchServerIP() {
 	labelMap := map[string]string{"app": d.podname}
 	opts := metav1.ListOptions{
 		LabelSelector: labels.SelectorFromSet(labelMap).String(),
@@ -76,11 +74,11 @@ func (d *DropTailer) WatchServerIP() {
 			podIP := p.Status.PodIP
 			if podIP != "" && d.oldPodIP != podIP {
 				d.logger.Infow("podIP changed, update /etc/hosts", "old", d.oldPodIP, "new", podIP)
-				d.hosts.RemoveHost("droptailer")
-				d.hosts.AddHost(p.Status.PodIP, "droptailer")
+				d.hosts.RemoveHost("audittailer")
+				d.hosts.AddHost(p.Status.PodIP, "audittailer")
 				err := d.hosts.Save()
 				if err != nil {
-					d.logger.Errorw("could not write droptailer hosts entry", "error", err)
+					d.logger.Errorw("could not write audittailer hosts entry", "error", err)
 				}
 				d.oldPodIP = podIP
 			}
@@ -88,13 +86,13 @@ func (d *DropTailer) WatchServerIP() {
 	}
 }
 
-// WatchClientSecret watches the droptailer-client secret and saves it to disk for the droptailer-client.
-func (d *DropTailer) WatchClientSecret() {
+/* // WatchClientSecret watches the audittailer-client secret and saves it to disk for the audittailer-client.
+func (d *AuditTailer) WatchClientSecret() {
 	keys := []string{secretKeyCaCertificate, secretKeyCertificate, secretKeyCertificateKey}
 	for {
 		s, err := d.client.CoreV1().Secrets(namespace).Watch(metav1.ListOptions{})
 		if err != nil {
-			d.logger.Errorw("could not watch for pods droptailer-client secret", "error", err)
+			d.logger.Errorw("could not watch for pods audittailer-client secret", "error", err)
 			time.Sleep(10 * time.Second)
 			continue
 		}
@@ -124,3 +122,4 @@ func (d *DropTailer) WatchClientSecret() {
 
 	}
 }
+*/

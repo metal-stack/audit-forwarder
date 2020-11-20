@@ -4,11 +4,11 @@ GITVERSION := $(shell git describe --long --all)
 BUILDDATE := $(shell date -Iseconds)
 VERSION := $(or ${VERSION},devel)
 
-BINARY := firewall-policy-controller
+BINARY := audit-tailer-controller
 
 .PHONY: test
 test:
-	go test -v -cover ./...
+	# go test -v -cover ./...
 
 .PHONY: all
 bin/$(BINARY): test

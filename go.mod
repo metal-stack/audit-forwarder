@@ -1,4 +1,4 @@
-module github.com/metal-stack/firewall-policy-controller
+module github.com/mreiger/audit-tailer-controller
 
 go 1.13
 
