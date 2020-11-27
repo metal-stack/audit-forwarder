@@ -4,13 +4,17 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	apiv1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	k8s "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"os"
+	"os/exec"
+	"strings"
 
 	"github.com/metal-stack/v"
-	"github.com/mreiger/audit-tailer-controller/pkg/audittailer"
 
 	"github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
@@ -20,6 +24,9 @@ import (
 const (
 	moduleName   = "audit-tailer-controller"
 	systemctlBin = "/bin/systemctl"
+	namespace    = "kube-system"
+	podname      = "kubernetes-audit-tailer"
+	podport      = "24224"
 )
 
 var rootCmd = &cobra.Command{
@@ -51,7 +58,7 @@ func init() {
 		logger.Fatal(err)
 	}
 	rootCmd.PersistentFlags().StringP("kubecfg", "k", homedir+"/.kube/config", "kubecfg path to the cluster to account")
-	rootCmd.PersistentFlags().Duration("fetch-interval", 10*time.Second, "interval for reassembling firewall rules")
+	rootCmd.PersistentFlags().Duration("fetch-interval", 10*time.Second, "interval for checking availability of target")
 	viper.AutomaticEnv()
 	err = viper.BindPFlags(rootCmd.PersistentFlags())
 	if err != nil {
@@ -65,79 +72,76 @@ func run() {
 		logger.Errorw("unable to connect to k8s", "error", err)
 		os.Exit(1)
 	}
-	auditTailer, err := audittailer.NewAuditTailer(logger, client)
-	if err != nil {
-		logger.Errorw("unable to create audittailer client", "error", err)
-		os.Exit(1)
+
+	fetchInterval := viper.GetDuration("fetch-interval")
+	oldPodIP := "0.0.0.0"
+	var oldPodDate time.Time
+	logger.Infow("Initial old values", "oldPodIP", oldPodIP, "oldPodDate", oldPodDate)
+	forwarder, _ := os.FindProcess(os.Getpid()) // This is just to initialize forwarder
+
+	labelMap := map[string]string{"app": podname}
+	opts := metav1.ListOptions{
+		LabelSelector: labels.SelectorFromSet(labelMap).String(),
 	}
-
-	// watch for server IP
-	c := make(chan bool)
-	go auditTailer.WatchServerIP()
-	// go dropTailer.WatchClientSecret()	// We'll start without SSL - no need for secrets just yet
-
-	time.Sleep(time.Hour) // Sleep for an hour so we can see what's happening.
-
-	// regularly trigger fetch of k8s resources
-	go func() {
-		t := time.NewTicker(viper.GetDuration("fetch-interval"))
-		for {
-			<-t.C
-			c <- true
+	for {
+		watcher, err := client.CoreV1().Pods(namespace).Watch(opts)
+		if err != nil {
+			logger.Errorw("could not watch for pods", "error", err)
+			time.Sleep(fetchInterval)
+			continue
 		}
-	}()
+		for event := range watcher.ResultChan() {
+			p, ok := event.Object.(*apiv1.Pod)
+			if !ok {
+				logger.Error("unexpected type")
+			}
+			podIP := p.Status.PodIP
+			logger.Infow("Pod IPs", "old", oldPodIP, "new", podIP)
+			if podIP != "" && oldPodIP != podIP {
+				podDate := p.Status.StartTime.Time
+				logger.Infow("Pod dates", "old", oldPodDate, "new", podDate)
+				if podDate.After(oldPodDate) {
+					logger.Infow("podIP changed, (re-)start forwarder", "old", oldPodIP, "new", podIP, "old date", oldPodDate, "new date", podDate)
 
-	// debounce events and handle fetch
-	// 	d := time.Second * 3
-	// 	t := time.NewTimer(d)
-	// 	for {
-	// 		select {
-	// 		case <-c:
-	// 			t.Reset(d)
-	// 		case <-t.C:
-	// 			new, err = ctr.FetchAndAssemble()
-	// 			if err != nil {
-	// 				logger.Errorw("could not fetch k8s entities to build firewall rules", "error", err)
-	// 			}
-	// 			if !new.HasChanged(old) {
-	// 				old = new
-	// 				continue
-	// 			}
-	// 			old = new
-	// 			logger.Infow("new fw rules to enforce", "ingress", len(new.IngressRules), "egress", len(new.EgressRules))
-	// 			for k, i := range new.IngressRules {
-	// 				fmt.Printf("%d ingress: %s\n", k+1, i)
-	// 			}
-	// 			for k, e := range new.EgressRules {
-	// 				fmt.Printf("%d egress: %s\n", k+1, e)
-	// 			}
-	// 			if !viper.GetBool("dry-run") {
-	// 				rs, err := new.Render()
-	// 				if err != nil {
-	// 					logger.Errorw("error rendering nftables rules", "error", err)
-	// 					continue
-	// 				}
-	// 				err = ioutil.WriteFile(nftFile, []byte(rs), 0644)
-	// 				if err != nil {
-	// 					logger.Errorw("error writing nftables file", "file", nftFile, "error", err)
-	// 					continue
-	// 				}
-	// 				c := exec.Command(nftBin, "-c", "-f", nftFile)
-	// 				out, err := c.Output()
-	// 				if err != nil {
-	// 					logger.Errorw("nftables file is invalid", "file", nftFile, "error", fmt.Sprint(out))
-	// 					continue
-	// 				}
-	// 				c = exec.Command(systemctlBin, "reload", nftablesService)
-	// 				err = c.Run()
-	// 				if err != nil {
-	// 					logger.Errorw("nftables.service file could not be reloaded")
-	// 					continue
-	// 				}
-	// 				logger.Info("applied new set of nftable rules")
-	// 			}
-	// 		}
-	// 	}
+					// kill the old process
+					if forwarder.Pid != os.Getpid() {
+						logger.Infow("Killing old process", "PID", forwarder.Pid)
+						err := forwarder.Kill()
+						if err != nil {
+							logger.Errorw("Could not kill old process", "PID", forwarder.Pid, "error", err)
+						}
+						err = forwarder.Release()
+						if err != nil {
+							logger.Errorw("Could not release old process", "PID", forwarder.Pid, "error", err)
+						}
+
+					}
+
+					logger.Info("Building command")
+					cmd := exec.Command("sleep", "3600")
+					cmd.Stdout = os.Stdout // Lets us see stdout and stderr of cmd
+					cmd.Stderr = os.Stderr
+					cmd.Env = append(os.Environ(),
+						"AUDIT_TAILER_HOST="+podIP,
+						"AUDIT_TAILER_PORT="+podport,
+					)
+					logger.Infow("Executing:", "Command", strings.Join(cmd.Args, " "), ", Environment:", strings.Join(cmd.Env, ", "))
+
+					err := cmd.Start()
+					if err != nil {
+						logger.Fatalw("cmd.Start() failed", "error", err)
+					}
+
+					forwarder = cmd.Process
+					logger.Infow("Process started", "PID", forwarder.Pid)
+
+					oldPodIP = podIP
+					oldPodDate = podDate
+				}
+			}
+			logger.Info("After for loop")
+		}
+	}
 }
 
 func loadClient(kubeconfigPath string) (*k8s.Clientset, error) {
