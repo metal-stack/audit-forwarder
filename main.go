@@ -10,6 +10,7 @@ import (
 	k8s "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"context"
 	"os"
 	"os/exec"
 	"strings"
@@ -77,7 +78,9 @@ func run() {
 	oldPodIP := "0.0.0.0"
 	var oldPodDate time.Time
 	logger.Infow("Initial old values", "oldPodIP", oldPodIP, "oldPodDate", oldPodDate)
-	forwarder, _ := os.FindProcess(os.Getpid()) // This is just to initialize forwarder
+	// forwarder, _ := os.FindProcess(os.Getpid()) // This is just to initialize forwarder
+
+	ctx, cancel := context.WithCancel(context.Background())
 
 	labelMap := map[string]string{"app": podname}
 	opts := metav1.ListOptions{
@@ -104,36 +107,57 @@ func run() {
 					logger.Infow("podIP changed, (re-)start forwarder", "old", oldPodIP, "new", podIP, "old date", oldPodDate, "new date", podDate)
 
 					// kill the old process
-					if forwarder.Pid != os.Getpid() {
-						logger.Infow("Killing old process", "PID", forwarder.Pid)
-						err := forwarder.Kill()
-						if err != nil {
-							logger.Errorw("Could not kill old process", "PID", forwarder.Pid, "error", err)
+					// if forwarder.Pid != os.Getpid() {
+					// logger.Infow("Killing old process", "PID", forwarder.Pid)
+					// err := forwarder.Kill()
+					// err := forwarder.Signal(syscall.SIGTERM)
+					// if err != nil {
+					// 	logger.Errorw("Could not kill old process", "PID", forwarder.Pid, "error", err)
+					// }
+					// err = forwarder.Release()
+					// if err != nil {
+					// 	logger.Errorw("Could not release old process", "PID", forwarder.Pid, "error", err)
+					// }
+					// cancel()
+
+					//}
+
+					cancel()
+					// Wait for the old forwarder to exit
+					time.Sleep(fetchInterval)
+
+					ctx, cancel = context.WithCancel(context.Background())
+
+					go func() {
+						for {
+
+							logger.Info("Building command")
+
+							cmd := exec.CommandContext(ctx, "sleep", "3600")
+							cmd.Stdout = os.Stdout // Lets us see stdout and stderr of cmd
+							cmd.Stderr = os.Stderr
+							cmd.Env = append(os.Environ(),
+								"AUDIT_TAILER_HOST="+podIP,
+								"AUDIT_TAILER_PORT="+podport,
+							)
+							logger.Infow("Executing:", "Command", strings.Join(cmd.Args, " "), ", Environment:", strings.Join(cmd.Env, ", "))
+
+							err := cmd.Run()
+							if err != nil {
+								logger.Errorw("cmd.Run() exited", "error", err)
+							}
+							// command is finished, now we check if it died or if it got canceled.
+							select {
+							case <-ctx.Done():
+								logger.Infow("Command got canceled", "Error", ctx.Err())
+								return
+							default:
+							}
 						}
-						err = forwarder.Release()
-						if err != nil {
-							logger.Errorw("Could not release old process", "PID", forwarder.Pid, "error", err)
-						}
+					}()
 
-					}
-
-					logger.Info("Building command")
-					cmd := exec.Command("sleep", "3600")
-					cmd.Stdout = os.Stdout // Lets us see stdout and stderr of cmd
-					cmd.Stderr = os.Stderr
-					cmd.Env = append(os.Environ(),
-						"AUDIT_TAILER_HOST="+podIP,
-						"AUDIT_TAILER_PORT="+podport,
-					)
-					logger.Infow("Executing:", "Command", strings.Join(cmd.Args, " "), ", Environment:", strings.Join(cmd.Env, ", "))
-
-					err := cmd.Start()
-					if err != nil {
-						logger.Fatalw("cmd.Start() failed", "error", err)
-					}
-
-					forwarder = cmd.Process
-					logger.Infow("Process started", "PID", forwarder.Pid)
+					// forwarder = cmd.Process
+					// logger.Infow("Process started", "PID", forwarder.Pid)
 
 					oldPodIP = podIP
 					oldPodDate = podDate
