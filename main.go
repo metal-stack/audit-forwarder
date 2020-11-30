@@ -23,16 +23,18 @@ import (
 )
 
 const (
-	moduleName   = "audit-tailer-controller"
+	moduleName   = "audit-forwarder-controller"
 	systemctlBin = "/bin/systemctl"
 	namespace    = "kube-system"
 	podname      = "kubernetes-audit-tailer"
 	podport      = "24224"
+	commandName  = "sleep"
+	commandArgs  = "3600"
 )
 
 var rootCmd = &cobra.Command{
 	Use:     moduleName,
-	Short:   "a service that watches for an audit-tailer server pod in the cluster and then starts the audit-tailer client pod with the correct destination IP",
+	Short:   "a service that watches for an audit-tailer pod in the cluster and then starts the audit-forwarder with the right destination IP",
 	Version: v.V.String(),
 	Run: func(cmd *cobra.Command, args []string) {
 		run()
@@ -48,7 +50,7 @@ func main() {
 	}()
 	logger = zap.Sugar()
 	if err := rootCmd.Execute(); err != nil {
-		logger.Error("failed executing root command", "error", err)
+		logger.Error("Failed executing root command", "Error", err)
 	}
 }
 
@@ -70,17 +72,19 @@ func init() {
 func run() {
 	client, err := loadClient(viper.GetString("kubecfg"))
 	if err != nil {
-		logger.Errorw("unable to connect to k8s", "error", err)
+		logger.Errorw("Unable to connect to k8s", "Error", err)
 		os.Exit(1)
 	}
 
 	fetchInterval := viper.GetDuration("fetch-interval")
-	oldPodIP := "0.0.0.0"
-	var oldPodDate time.Time
-	logger.Infow("Initial old values", "oldPodIP", oldPodIP, "oldPodDate", oldPodDate)
-	// forwarder, _ := os.FindProcess(os.Getpid()) // This is just to initialize forwarder
 
+	// initialising variables used in pod loop
+	oldPodIP := ""
+	var oldPodDate time.Time
 	ctx, cancel := context.WithCancel(context.Background())
+	forwarderKilled := make(chan struct{})
+
+	logger.Infow("Initial old values", "oldPodIP", oldPodIP, "oldPodDate", oldPodDate)
 
 	labelMap := map[string]string{"app": podname}
 	opts := metav1.ListOptions{
@@ -89,51 +93,37 @@ func run() {
 	for {
 		watcher, err := client.CoreV1().Pods(namespace).Watch(opts)
 		if err != nil {
-			logger.Errorw("could not watch for pods", "error", err)
+			logger.Errorw("Could not watch for pods", "Error", err)
 			time.Sleep(fetchInterval)
 			continue
 		}
 		for event := range watcher.ResultChan() {
 			p, ok := event.Object.(*apiv1.Pod)
 			if !ok {
-				logger.Error("unexpected type")
+				logger.Error("Unexpected type")
 			}
 			podIP := p.Status.PodIP
-			logger.Infow("Pod IPs", "old", oldPodIP, "new", podIP)
+			logger.Infow("Pod change detected", "old IP", oldPodIP, "new IP", podIP)
 			if podIP != "" && oldPodIP != podIP {
 				podDate := p.Status.StartTime.Time
 				logger.Infow("Pod dates", "old", oldPodDate, "new", podDate)
 				if podDate.After(oldPodDate) {
-					logger.Infow("podIP changed, (re-)start forwarder", "old", oldPodIP, "new", podIP, "old date", oldPodDate, "new date", podDate)
-
-					// kill the old process
-					// if forwarder.Pid != os.Getpid() {
-					// logger.Infow("Killing old process", "PID", forwarder.Pid)
-					// err := forwarder.Kill()
-					// err := forwarder.Signal(syscall.SIGTERM)
-					// if err != nil {
-					// 	logger.Errorw("Could not kill old process", "PID", forwarder.Pid, "error", err)
-					// }
-					// err = forwarder.Release()
-					// if err != nil {
-					// 	logger.Errorw("Could not release old process", "PID", forwarder.Pid, "error", err)
-					// }
-					// cancel()
-
-					//}
-
-					cancel()
-					// Wait for the old forwarder to exit
-					time.Sleep(fetchInterval)
-
-					ctx, cancel = context.WithCancel(context.Background())
+					logger.Infow("Newer pod detected, (re-)starting forwarder")
+					if oldPodIP != "" {
+						logger.Infow("Killing old forwarder")
+						cancel()
+						// Wait for the old forwarder to exit
+						<-forwarderKilled
+						// Create new context
+						ctx, cancel = context.WithCancel(context.Background())
+					}
 
 					go func() {
 						for {
 
-							logger.Info("Building command")
+							logger.Info("Building forwarder command")
 
-							cmd := exec.CommandContext(ctx, "sleep", "3600")
+							cmd := exec.CommandContext(ctx, commandName, commandArgs)
 							cmd.Stdout = os.Stdout // Lets us see stdout and stderr of cmd
 							cmd.Stderr = os.Stderr
 							cmd.Env = append(os.Environ(),
@@ -144,26 +134,25 @@ func run() {
 
 							err := cmd.Run()
 							if err != nil {
-								logger.Errorw("cmd.Run() exited", "error", err)
+								logger.Errorw("Forwarder exited", "Error", err)
 							}
 							// command is finished, now we check if it died or if it got canceled.
 							select {
 							case <-ctx.Done():
-								logger.Infow("Command got canceled", "Error", ctx.Err())
+								logger.Infow("Old forwarder is killed, returning", "Error", ctx.Err())
+								forwarderKilled <- struct{}{}
 								return
 							default:
+								logger.Infow("Forwarder was not killed by this controller, restarting")
 							}
 						}
 					}()
-
-					// forwarder = cmd.Process
-					// logger.Infow("Process started", "PID", forwarder.Pid)
 
 					oldPodIP = podIP
 					oldPodDate = podDate
 				}
 			}
-			logger.Info("After for loop")
+			logger.Info("Pod change handled")
 		}
 	}
 }
