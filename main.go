@@ -78,6 +78,10 @@ func run() {
 
 	fetchInterval := viper.GetDuration("fetch-interval")
 
+	// Apparently we now need to pass a context co k8s client API
+	kubectx, kubecancel := context.WithCancel(context.Background())
+	defer kubecancel()
+
 	// initialising variables used in pod loop
 	oldPodIP := ""
 	var oldPodDate time.Time
@@ -91,7 +95,7 @@ func run() {
 		LabelSelector: labels.SelectorFromSet(labelMap).String(),
 	}
 	for {
-		watcher, err := client.CoreV1().Pods(namespace).Watch(opts)
+		watcher, err := client.CoreV1().Pods(namespace).Watch(kubectx, opts)
 		if err != nil {
 			logger.Errorw("Could not watch for pods", "Error", err)
 			time.Sleep(fetchInterval)
