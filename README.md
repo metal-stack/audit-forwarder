@@ -1,61 +1,15 @@
-# Firewall-Policy-Controller
+# Audit-forwarder
 
-***DEPRECATED*** and replaced by [firewall-controller](https://github.com/metal-stack/firewall-controller)
-
-This is a small controller to generate nftables rules based on network policies and services.
+This is a small piece of software that is intended to run as sidecar in an out-of-cluster kube-apiserver (for example: https://github.com/gardener/gardener clusters) and forward the audit log data back into the cluster where it can be picked up by cluster monitoring / logging software.
 
 ## Current scope for the implementation
 
-- the firewall is not part of the kubernetes cluster
-    => is not visible as node and gets no pods scheduled on it
-- it gets access to the kube-api server with a kubeconfig that gets injected via ignition user data
-- it watches for `NetworkPolicy` objects in the default namespace  and `Service` objects in all namespaces and assembles ingress / egress firewall rules for them
-  - `NetworkPolicy` need an empty `podSelector`
-  - `Service` objects of type `LoadBalancer` and `NodePort` need the `loadBalancerSourceRanges` attribute
+- The audit-forwarder has to run as sidecar container of the kube-apiserver
+- The audit data needs to be logged to file in a shared volume
+- There has to be a corresponding `kubernetes-audit-tailer` pod in the cluster that receives the audit data and makes it available to a cluster logging solution, e.g. by writing it to its stdout so that it appears as container log
+- We use fluent-bit with the `forward` out plugin as forwarding agent because it is built for the task of reliably forwarding log data. There needs to be a corresponding fluent-bit or fluentd in the `kubernetes-audit-tailer` pod to receive the data
 
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: np-egress-dns
-  namespace: default
-spec:
-  podSelector: {}
-  policyTypes:
-  - Egress
-  egress:
-  - to:
-    - ipBlock:
-        cidr: 1.0.0.1/32
-    ports:
-    - protocol: UDP
-      port: 53
-
-```
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: s1
-  namespace: test-ns
-spec:
-  type: LoadBalancer
-  loadBalancerIP: 212.37.83.1
-  loadBalancerSourceRanges:
-  - 192.168.0.0/24
-  ports:
-  - name: http
-    protocol: TCP
-    port: 80
-    targetPort: 8063
-```
 
 ## Testing locally
 
-```bash
-make
-./bin/firewall-policy-controller -k kubeconfig
-kubectl --kubeconfig kubeconfig apply --recursive -f pkg/controller/test_data/case1/
-kubectl --kubeconfig kubeconfig delete --recursive -f pkg/controller/test_data/case1/
-```
+TBD
