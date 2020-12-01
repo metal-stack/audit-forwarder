@@ -23,13 +23,13 @@ import (
 )
 
 const (
-	moduleName   = "audit-forwarder-controller"
+	moduleName   = "audit-forwarder"
 	systemctlBin = "/bin/systemctl"
 	namespace    = "kube-system"
 	podname      = "kubernetes-audit-tailer"
 	podport      = "24224"
-	commandName  = "sleep"
-	commandArgs  = "3600"
+	commandName  = "/fluent-bit/bin/fluent-bit"
+	commandArgs  = "--config=/fluent-bit/etc/fluent-bit.conf"
 )
 
 var rootCmd = &cobra.Command{
@@ -148,6 +148,7 @@ func run() {
 								return
 							default:
 								logger.Infow("Forwarder was not killed by this controller, restarting")
+								time.Sleep(fetchInterval)
 							}
 						}
 					}()

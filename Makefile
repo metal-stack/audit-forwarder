@@ -4,7 +4,7 @@ GITVERSION := $(shell git describe --long --all)
 BUILDDATE := $(shell date -Iseconds)
 VERSION := $(or ${VERSION},devel)
 
-BINARY := audit-forwarder-controller
+BINARY := audit-forwarder
 
 .PHONY: test
 test:
@@ -32,6 +32,9 @@ release: bin/$(BINARY)
 	&& tar -cvzf $(BINARY).tgz usr/local/bin/$(BINARY) \
 	&& mv $(BINARY).tgz .. \
 	&& cd -
+
+dockerimage:
+	docker build -t mreiger/audit-forwarder .
 
 .PHONY: all
 all:: release;
