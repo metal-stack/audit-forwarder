@@ -23,13 +23,12 @@ import (
 )
 
 const (
-	moduleName   = "audit-forwarder"
-	systemctlBin = "/bin/systemctl"
-	namespace    = "kube-system"
-	podname      = "kubernetes-audit-tailer"
-	podport      = "24224"
-	commandName  = "/fluent-bit/bin/fluent-bit"
-	commandArgs  = "--config=/fluent-bit/etc/fluent-bit.conf"
+	moduleName  = "audit-forwarder"
+	namespace   = "kube-system"
+	podname     = "kubernetes-audit-tailer"
+	podport     = "24224"
+	commandName = "/fluent-bit/bin/fluent-bit"
+	commandArgs = "--config=/fluent-bit/etc/fluent-bit.conf"
 )
 
 var rootCmd = &cobra.Command{
