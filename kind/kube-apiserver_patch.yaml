@@ -1,0 +1,21 @@
+- op: add
+  path: /spec/containers/1
+  value:
+    image: mreiger/audit-forwarder
+    imagePullPolicy: IfNotPresent
+    name: audit-forwarder
+    env:
+    - name: AUDIT_KUBECFG
+      value: "/kube.config"
+    volumeMounts:
+    - mountPath: /audit
+      name: auditlog
+    - mountPath: /kube.config
+      name: kubeconfig
+- op: add
+  path: /spec/volumes/0
+  value:
+    hostPath:
+      path: /etc/kubernetes/audit/kube.config
+      type: File
+    name: kubeconfig

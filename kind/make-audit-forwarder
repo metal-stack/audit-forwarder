@@ -1,0 +1,21 @@
+#!/bin/sh
+#
+# First get the kube-apiserver manifest:
+
+cp kind-etc-kubernetes/manifests/kube-apiserver.yaml .
+
+# Patch the generated kind kubeconfig with the apiserver URL valid from within the cluster.
+
+echo "Generating the in-cluster kubeconfig:"
+
+# Get the IP and port from the apiserver manifest:
+line=`grep kubeadm.kubernetes.io/kube-apiserver.advertise-address.endpoint kube-apiserver.yaml`
+apiserver=${line##*kubeadm.kubernetes.io\/kube-apiserver.advertise-address.endpoint:?}
+
+sed "s+https://.*$+https://$apiserver+" kube.config >kind-etc-kubernetes/audit/kube.config
+
+# Wait a little so there's no timing problem
+sleep 5
+
+echo "Patching and applying the kube-apiserver manifest:"
+kustomize build >kind-etc-kubernetes/manifests/kube-apiserver.yaml

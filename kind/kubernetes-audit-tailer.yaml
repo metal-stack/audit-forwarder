@@ -1,0 +1,64 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubernetes-audit-tailer
+  namespace: kube-system
+  labels:
+    k8s-app: kubernetes-audit-tailer
+spec:
+  selector:
+    matchLabels:
+      k8s-app: kubernetes-audit-tailer
+  template:
+    metadata:
+      labels:
+        k8s-app: kubernetes-audit-tailer
+        app: kubernetes-audit-tailer
+        networking.gardener.cloud/to-public-networks: allowed
+    spec:
+      # it's better to disable the service links as the default args do not work properly otherwise (metal#64)
+      enableServiceLinks: False
+      containers:
+      - image: fluent/fluent-bit:1.6-debug  # debug image has busybox
+        imagePullPolicy: IfNotPresent
+        name: kubernetes-audit-tailer
+        env: []
+        ports:
+        - containerPort: 24224
+          protocol: TCP
+        volumeMounts:
+        - name: fluent-bit-config
+          mountPath: /fluent-bit/etc/
+      volumes:
+      - name: fluent-bit-config
+        configMap:
+          name: kubernetes-audit-tailer-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubernetes-audit-tailer-config
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: kubernetes-audit-tailer
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+        Flush        1
+        Daemon       Off
+        Log_Level    info
+    [INPUT]
+        Name              forward
+        Listen            0.0.0.0
+        Port              24224
+        # Buffer_Chunk_Size 32KB
+        # Buffer_Max_Size   64KB
+        Buffer_Chunk_Size 128KB
+        Buffer_Max_Size   2MB
+
+    [OUTPUT]
+        Name            stdout
+        Format          json_lines
+        json_date_key   false
+        Match           *
