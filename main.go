@@ -71,8 +71,7 @@ func init() {
 func run() {
 	client, err := loadClient(viper.GetString("kubecfg"))
 	if err != nil {
-		logger.Errorw("Unable to connect to k8s", "Error", err)
-		os.Exit(1)
+		logger.Fatalw("Unable to connect to k8s", "Error", err)
 	}
 
 	fetchInterval := viper.GetDuration("fetch-interval")
@@ -96,9 +95,7 @@ func run() {
 	for {
 		watcher, err := client.CoreV1().Pods(namespace).Watch(kubectx, opts)
 		if err != nil {
-			logger.Errorw("Could not watch for pods", "Error", err)
-			time.Sleep(fetchInterval)
-			continue
+			logger.Fatalw("Could not watch for pods", "Error", err)
 		}
 		for event := range watcher.ResultChan() {
 			p, ok := event.Object.(*apiv1.Pod)
