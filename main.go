@@ -101,6 +101,7 @@ func run() {
 			p, ok := event.Object.(*apiv1.Pod)
 			if !ok {
 				logger.Error("Unexpected type")
+				continue
 			}
 			podIP := p.Status.PodIP
 			logger.Infow("Pod change detected", "old IP", oldPodIP, "new IP", podIP)
