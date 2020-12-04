@@ -1,4 +1,4 @@
-module github.com/mreiger/audit-tailer-controller
+module github.com/mreiger/audit-forwarder
 
 go 1.13
 
@@ -11,6 +11,7 @@ require (
 	github.com/spf13/cobra v1.1.1
 	github.com/spf13/viper v1.7.1
 	go.uber.org/zap v1.16.0
+	gopkg.in/go-playground/assert.v1 v1.2.1 // indirect
 	gopkg.in/go-playground/validator.v9 v9.31.0
 	k8s.io/api v0.19.4
 	k8s.io/apimachinery v0.19.4
