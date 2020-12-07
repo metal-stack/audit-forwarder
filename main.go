@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	k8s "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
 	"context"
 	"os"
@@ -21,6 +22,8 @@ import (
 	"github.com/metal-stack/v"
 
 	"github.com/mitchellh/go-homedir"
+	"github.com/pkg/errors"
+	"github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"gopkg.in/go-playground/validator.v9"
@@ -36,7 +39,22 @@ const (
 var (
 	cfgFile string
 	logger  *zap.SugaredLogger
+	stop    <-chan struct{}
 )
+
+// CronLogger is used for logging within the cron function.
+type CronLogger struct {
+	l *zap.SugaredLogger
+}
+
+// Info logs info messages from the cron function.
+func (c *CronLogger) Info(msg string, keysAndValues ...interface{}) {
+	c.l.Infow(msg, keysAndValues)
+}
+
+func (c *CronLogger) Error(err error, msg string, keysAndValues ...interface{}) {
+	c.l.Errorw(msg, keysAndValues)
+}
 
 // Opts is required in order to have proper validation for args from cobra and viper.
 // this is because MarkFlagRequired from cobra does not work well with viper, see:
@@ -47,12 +65,13 @@ type Opts struct {
 	NameSpace     string
 	ServiceName   string
 	ServicePort   int
+	CheckSchedule string
 	LogLevel      string
 }
 
 var cmd = &cobra.Command{
 	Use:     moduleName,
-	Short:   "a webhook that accepts audit events and writes them to stdout so they can be picked up by another log processing system.",
+	Short:   "A program to forward audit logs to a service in the cluster. It looks for a matching service, then starts fluent-bit to pick up the log events and do the actual forwarding.",
 	Version: v.V.String(),
 	Run: func(cmd *cobra.Command, args []string) {
 		initConfig()
@@ -61,6 +80,7 @@ var cmd = &cobra.Command{
 			log.Fatalf("unable to init options, error: %v", err)
 		}
 		initLogging()
+		initSignalHandlers()
 		run(opts)
 	},
 }
@@ -82,6 +102,7 @@ func init() {
 	cmd.Flags().StringP("namespace", "", "kube-system", "the namespace of the audit-tailer service")
 	cmd.Flags().StringP("service-name", "", "kubernetes-audit-tailer", "the service name of the audit-tailer service")
 	cmd.Flags().IntP("service-port", "", 24224, "the service port of the audit-tailer service")
+	cmd.Flags().StringP("check-schedule", "", "*/1 * * * *", "cron schedule when to check for service changes")
 
 	err = viper.BindPFlags(cmd.Flags())
 	if err != nil {
@@ -96,6 +117,7 @@ func initOpts() (*Opts, error) {
 		NameSpace:     viper.GetString("namespace"),
 		ServiceName:   viper.GetString("service-name"),
 		ServicePort:   viper.GetInt("service-port"),
+		CheckSchedule: viper.GetString("check-schedule"),
 		LogLevel:      viper.GetString("log-level"),
 	}
 
@@ -175,12 +197,53 @@ func initLogging() {
 	logger = l.Sugar()
 }
 
-func run(opts *Opts) {
+func initSignalHandlers() {
+	stop = signals.SetupSignalHandler()
+}
+
+func run(opts *Opts) error {
 	logger.Infow("Options", "opts", opts)
 	client, err := loadClient(opts.KubeCfg)
 	if err != nil {
 		logger.Fatalw("Unable to connect to k8s", "Error", err)
 	}
+
+	// Cron! BLOCK PASTED COMMANDS
+
+	cronjob := cron.New(cron.WithChain(
+		cron.SkipIfStillRunning(&CronLogger{l: logger.Named("cron")}),
+	))
+
+	id, err := cronjob.AddFunc(opts.CheckSchedule, func() {
+		err := checkService(opts, client)
+		if err != nil {
+			logger.Errorw("error during service check", "error", err)
+		}
+
+		for _, e := range cronjob.Entries() {
+			logger.Infow("scheduling next service check", "at", e.Next.String())
+		}
+	})
+	if err != nil {
+		return errors.Wrap(err, "could not initialize cron schedule")
+	}
+
+	logger.Infow("start service check", "version", v.V.String())
+
+	err = checkService(opts, client)
+	if err != nil {
+		logger.Errorw("error during initial service check", "error", err)
+	}
+	cronjob.Start()
+	logger.Infow("scheduling next service check", "at", cronjob.Entry(id).Next.String())
+
+	<-stop
+	logger.Info("received stop signal, shutting down...")
+
+	cronjob.Stop()
+	return nil
+
+	// END BLOCK PASTED COMMANDS
 
 	// Apparently we now need to pass a context co k8s client API
 	kubectx, kubecancel := context.WithCancel(context.Background())
@@ -271,4 +334,9 @@ func loadClient(kubeconfigPath string) (*k8s.Clientset, error) {
 		return nil, err
 	}
 	return k8s.NewForConfig(config)
+}
+
+func checkService(opts *Opts, client *k8s.Clientset) error {
+	logger.Infow("Function checkService called")
+	return nil
 }
