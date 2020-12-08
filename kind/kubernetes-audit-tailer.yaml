@@ -75,3 +75,4 @@ spec:
   ports:
   - port: 24224
     targetPort: 24224
+
