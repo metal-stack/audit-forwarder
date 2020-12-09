@@ -9,7 +9,6 @@ import (
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	// "k8s.io/apimachinery/pkg/labels"
 	k8s "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
@@ -41,13 +40,13 @@ const (
 )
 
 var (
-	cfgFile         string
-	logger          *zap.SugaredLogger
-	stop            <-chan struct{}
-	targetService   *apiv1.Service
-	forwarderKilled chan struct{}
-	killForwarder   chan struct{}
-	forwarderPID    *os.Process
+	cfgFile          string
+	logger           *zap.SugaredLogger
+	stop             <-chan struct{}
+	targetService    *apiv1.Service
+	forwarderKilled  chan struct{}
+	killForwarder    chan struct{}
+	forwarderProcess *os.Process
 )
 
 // CronLogger is used for logging within the cron function.
@@ -69,7 +68,6 @@ func (c *CronLogger) Error(err error, msg string, keysAndValues ...interface{}) 
 // https://github.com/spf13/viper/issues/397
 type Opts struct {
 	KubeCfg       string
-	FetchInterval time.Duration
 	NameSpace     string
 	ServiceName   string
 	ServicePort   int
@@ -105,7 +103,6 @@ func init() {
 	cmd.Flags().StringVarP(&cfgFile, "config", "c", "", "alternative path to config file")
 
 	cmd.Flags().StringP("kubecfg", "k", homedir+"/.kube/config", "kubecfg path to the cluster to account")
-	cmd.Flags().Duration("fetch-interval", 10*time.Second, "interval for checking availability of target")
 
 	cmd.Flags().StringP("namespace", "", "kube-system", "the namespace of the audit-tailer service")
 	cmd.Flags().StringP("service-name", "", "kubernetes-audit-tailer", "the service name of the audit-tailer service")
@@ -121,7 +118,6 @@ func init() {
 func initOpts() (*Opts, error) {
 	opts := &Opts{
 		KubeCfg:       viper.GetString("kubecfg"),
-		FetchInterval: viper.GetDuration("fetch-interval"),
 		NameSpace:     viper.GetString("namespace"),
 		ServiceName:   viper.GetString("service-name"),
 		ServicePort:   viper.GetInt("service-port"),
@@ -255,89 +251,6 @@ func run(opts *Opts) error {
 	cronjob.Stop()
 	return nil
 
-	// END run() function - below is old code that will never be reached.
-	// TODO Cleanup after this works.
-	ctx, cancel := context.WithCancel(context.Background())
-
-	// Apparently we now need to pass a context co k8s client API
-	kubectx, kubecancel := context.WithCancel(context.Background())
-	defer kubecancel()
-
-	// initialising variables used in pod loop
-	oldPodIP := ""
-	var oldPodDate time.Time
-
-	logger.Infow("Initial old values", "oldPodIP", oldPodIP, "oldPodDate", oldPodDate)
-
-	// labelMap := map[string]string{"app": opts.ServiceName}
-	options := metav1.ListOptions{
-		//		LabelSelector: labels.SelectorFromSet(labelMap).String(),
-	}
-	for {
-		watcher, err := client.CoreV1().Pods(opts.NameSpace).Watch(kubectx, options)
-		if err != nil {
-			logger.Fatalw("Could not watch for pods", "Error", err)
-		}
-		for event := range watcher.ResultChan() {
-			p, ok := event.Object.(*apiv1.Pod)
-			if !ok {
-				logger.Error("Unexpected type")
-				continue
-			}
-			podIP := p.Status.PodIP
-			logger.Infow("Pod change detected", "old IP", oldPodIP, "new IP", podIP)
-			if podIP != "" && oldPodIP != podIP {
-				podDate := p.Status.StartTime.Time
-				logger.Infow("Pod dates", "old", oldPodDate, "new", podDate)
-				if podDate.After(oldPodDate) {
-					logger.Infow("Newer pod detected, (re-)starting forwarder")
-					if oldPodIP != "" {
-						logger.Infow("Killing old forwarder")
-						cancel()
-						// Wait for the old forwarder to exit
-						<-forwarderKilled
-						// Create new context
-						ctx, cancel = context.WithCancel(context.Background())
-					}
-
-					go func() {
-						for {
-
-							logger.Info("Building forwarder command")
-
-							cmd := exec.CommandContext(ctx, commandName, commandArgs)
-							cmd.Stdout = os.Stdout // Lets us see stdout and stderr of cmd
-							cmd.Stderr = os.Stderr
-							cmd.Env = append(os.Environ(),
-								"AUDIT_TAILER_HOST="+podIP,
-								"AUDIT_TAILER_PORT="+strconv.Itoa(opts.ServicePort),
-							)
-							logger.Infow("Executing:", "Command", strings.Join(cmd.Args, " "), ", Environment:", strings.Join(cmd.Env, ", "))
-
-							err := cmd.Run()
-							if err != nil {
-								logger.Errorw("Forwarder exited", "Error", err)
-							}
-							// command is finished, now we check if it died or if it got canceled.
-							select {
-							case <-ctx.Done():
-								logger.Infow("Old forwarder is killed, returning", "Error", ctx.Err())
-								forwarderKilled <- struct{}{}
-								return
-							default:
-								logger.Infow("Forwarder was not killed by this controller, restarting")
-								time.Sleep(opts.FetchInterval)
-							}
-						}
-					}()
-
-					oldPodIP = podIP
-					oldPodDate = podDate
-				}
-			}
-			logger.Info("Pod change handled")
-		}
-	}
 }
 
 func loadClient(kubeconfigPath string) (*k8s.Clientset, error) {
@@ -362,20 +275,19 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 	serviceIP := service.Spec.ClusterIP
 	servicePort := service.Spec.Ports[0].Port
 	serviceResourceVersion := service.ObjectMeta.ResourceVersion
-	if targetService != nil { // This means a service was already detected
+	if targetService != nil { // This means a service was previously seen, and a forwarder should already be running.
 		if targetService.ObjectMeta.ResourceVersion == service.ObjectMeta.ResourceVersion {
 			logger.Infow("Service stayed the same, nothing to do.")
 			return nil
 		}
-		// We need to kill the old service
+		// We need to kill the old forwarder
 		logger.Infow("Killing old forwarder, writing to kill channel")
 		killForwarder <- struct{}{}
-		logger.Infow("Killing process", "PID", forwarderPID)
-		err = forwarderPID.Kill()
+		logger.Infow("Killing process", "PID", forwarderProcess)
+		err = forwarderProcess.Kill()
 		// Wait for the old forwarder to exit
 		<-forwarderKilled
-		// Create new context
-		logger.Infow("Forwarder exited, re-creating the context")
+		logger.Infow("Forwarder successfully killed")
 	}
 	logger.Infow("Target identified", "IP", serviceIP, "Port", servicePort, "Resourceversion", serviceResourceVersion)
 	go runForwarder(serviceIP, int(servicePort))
@@ -401,7 +313,7 @@ func runForwarder(serviceIP string, servicePort int) {
 			logger.Errorw("Could not start forwarder", "Error", err)
 		}
 		logger.Infow("Forwarder process", "PID", cmd.Process)
-		forwarderPID = cmd.Process
+		forwarderProcess = cmd.Process
 		err = cmd.Wait()
 		if err != nil {
 			logger.Errorw("Forwarder exited", "Error", err)
