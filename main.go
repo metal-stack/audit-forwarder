@@ -40,13 +40,13 @@ const (
 )
 
 var (
-	cfgFile          string
-	logger           *zap.SugaredLogger
-	stop             <-chan struct{}
-	targetService    *apiv1.Service
-	forwarderKilled  chan struct{}
-	killForwarder    chan struct{}
-	forwarderProcess *os.Process
+	cfgFile             string
+	logger              *zap.SugaredLogger
+	stop                <-chan struct{}
+	targetService       *apiv1.Service
+	forwarderKilledChan chan struct{}
+	killForwarderChan   chan struct{}
+	forwarderProcess    *os.Process
 )
 
 // CronLogger is used for logging within the cron function.
@@ -208,8 +208,8 @@ func initSignalHandlers() {
 func run(opts *Opts) error {
 	logger.Infow("Options", "opts", opts)
 	// initialise our synchronisation channels
-	forwarderKilled = make(chan struct{})
-	killForwarder = make(chan struct{}, 1)
+	forwarderKilledChan = make(chan struct{})
+	killForwarderChan = make(chan struct{}, 1)
 
 	// Prepare K8s
 	client, err := loadClient(opts.KubeCfg)
@@ -268,7 +268,12 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 	kubectx, kubecancel := context.WithTimeout(context.Background(), time.Duration(10*time.Second))
 	defer kubecancel()
 	service, err := client.CoreV1().Services(opts.NameSpace).Get(kubectx, opts.ServiceName, metav1.GetOptions{})
-	if err != nil {
+	if err != nil { // That means no matching service found
+		if targetService != nil { // This means a service was previously seen, and a forwarder should already be running.
+			logger.Infow("Service went away, killing forwarder")
+			killForwarder()
+			targetService = nil
+		}
 		return err
 	}
 	logger.Infow("Service gotten", "service", service)
@@ -276,18 +281,12 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 	servicePort := service.Spec.Ports[0].Port
 	serviceResourceVersion := service.ObjectMeta.ResourceVersion
 	if targetService != nil { // This means a service was previously seen, and a forwarder should already be running.
-		if targetService.ObjectMeta.ResourceVersion == service.ObjectMeta.ResourceVersion {
+		if targetService.Spec.ClusterIP == service.Spec.ClusterIP && targetService.Spec.Ports[0].Port == service.Spec.Ports[0].Port {
 			logger.Infow("Service stayed the same, nothing to do.")
 			return nil
 		}
 		// We need to kill the old forwarder
-		logger.Infow("Killing old forwarder, writing to kill channel")
-		killForwarder <- struct{}{}
-		logger.Infow("Killing process", "PID", forwarderProcess)
-		err = forwarderProcess.Kill()
-		// Wait for the old forwarder to exit
-		<-forwarderKilled
-		logger.Infow("Forwarder successfully killed")
+		killForwarder()
 	}
 	logger.Infow("Target identified", "IP", serviceIP, "Port", servicePort, "Resourceversion", serviceResourceVersion)
 	go runForwarder(serviceIP, int(servicePort))
@@ -320,9 +319,9 @@ func runForwarder(serviceIP string, servicePort int) {
 		}
 		// command is finished, now we check if it died or if it got canceled.
 		select {
-		case <-killForwarder:
+		case <-killForwarderChan:
 			logger.Infow("Old forwarder is killed on purpose")
-			forwarderKilled <- struct{}{}
+			forwarderKilledChan <- struct{}{}
 			logger.Infow("Written to confirmation channel, returning")
 			return
 		default:
@@ -330,4 +329,17 @@ func runForwarder(serviceIP string, servicePort int) {
 			time.Sleep(backoffTimer)
 		}
 	}
+}
+
+func killForwarder() {
+	logger.Infow("Killing old forwarder, writing to kill channel")
+	killForwarderChan <- struct{}{}
+	logger.Infow("Killing process", "PID", forwarderProcess)
+	err := forwarderProcess.Kill()
+	if err != nil {
+		logger.Errorw("Could not kill process", "Error", err)
+	}
+	// Wait for the old forwarder to exit
+	<-forwarderKilledChan
+	logger.Infow("Forwarder successfully killed")
 }
