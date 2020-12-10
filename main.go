@@ -77,7 +77,7 @@ type Opts struct {
 
 var cmd = &cobra.Command{
 	Use:     moduleName,
-	Short:   "A program to forward audit logs to a service in the cluster. It looks for a matching service, then starts fluent-bit to pick up the log events and do the actual forwarding.",
+	Short:   "A program to forward audit logs to a service in the cluster. It looks for a matching service, then starts a forwarder program (eg fluent-bit) to pick up the log events and do the actual forwarding.",
 	Version: v.V.String(),
 	Run: func(cmd *cobra.Command, args []string) {
 		initConfig()
@@ -89,18 +89,16 @@ var cmd = &cobra.Command{
 		initSignalHandlers()
 		err = run(opts)
 		if err != nil {
-			log.Printf("Main function run returned with error: %v", err)
+			log.Printf("run() function run returned with error: %v", err)
 		}
 	},
 }
 
 func init() {
-	log.Print("Function init() called.")
 	homedir, err := homedir.Dir()
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("Homedir variable homedir: %s", homedir)
 
 	cmd.Flags().StringP("log-level", "", "info", "sets the application log level")
 	cmd.Flags().StringVarP(&cfgFile, "config", "c", "", "alternative path to config file")
@@ -209,7 +207,7 @@ func initSignalHandlers() {
 }
 
 func run(opts *Opts) error {
-	logger.Infow("Options", "opts", opts)
+	logger.Debugw("Options", "opts", opts)
 	// initialise our synchronisation channels
 	forwarderKilledChan = make(chan struct{})
 	killForwarderChan = make(chan struct{}, 1)
@@ -266,8 +264,8 @@ func loadClient(kubeconfigPath string) (*k8s.Clientset, error) {
 }
 
 func checkService(opts *Opts, client *k8s.Clientset) error {
-	logger.Infow("Function checkService called")
-	logger.Infow("Current service", "targetService", targetService)
+	logger.Debugw("Checking service")
+	// logger.Debugw("Current service", "targetService", targetService)
 
 	kubectx, kubecancel := context.WithTimeout(context.Background(), time.Duration(10*time.Second))
 	defer kubecancel()
@@ -280,23 +278,25 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 		}
 		return err
 	}
-	logger.Infow("Service gotten", "service", service)
+
+	// logger.Debugw("Service gotten", "service", service)
 	serviceIP := service.Spec.ClusterIP
 	if len(service.Spec.Ports) != 1 {
 		logger.Errorw("Service must have exactly one port", "Ports", service.Spec.Ports)
 		return errors.Errorf("Service must have exactly one port")
 	}
 	servicePort := service.Spec.Ports[0].Port
-	serviceResourceVersion := service.ObjectMeta.ResourceVersion
+
 	if targetService != nil { // This means a service was previously seen, and a forwarder should already be running.
 		if targetService.Spec.ClusterIP == service.Spec.ClusterIP && targetService.Spec.Ports[0].Port == service.Spec.Ports[0].Port {
-			logger.Infow("Service stayed the same, nothing to do.")
+			logger.Debugw("Service stayed the same, nothing to do.")
 			return nil
 		}
 		// We need to kill the old forwarder
 		killForwarder()
 	}
-	logger.Infow("Target identified", "IP", serviceIP, "Port", servicePort, "Resourceversion", serviceResourceVersion)
+
+	logger.Infow("Target identified", "IP", serviceIP, "Port", servicePort)
 	go runForwarder(serviceIP, int(servicePort))
 	targetService = service
 	return nil
@@ -304,7 +304,7 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 
 func runForwarder(serviceIP string, servicePort int) {
 	for {
-		logger.Info("Building forwarder command")
+		logger.Info("Starting forwarder")
 
 		cmd := exec.Command(commandName, commandArgs)
 		cmd.Stdout = os.Stdout // Lets us see stdout and stderr of cmd
@@ -313,7 +313,7 @@ func runForwarder(serviceIP string, servicePort int) {
 			"AUDIT_TAILER_HOST="+serviceIP,
 			"AUDIT_TAILER_PORT="+strconv.Itoa(servicePort),
 		)
-		logger.Infow("Executing:", "Command", strings.Join(cmd.Args, " "), ", Environment:", strings.Join(cmd.Env, ", "))
+		logger.Debugw("Executing:", "Command", strings.Join(cmd.Args, " "), ", Environment:", strings.Join(cmd.Env, ", "))
 
 		err := cmd.Start()
 		if err != nil {
@@ -322,27 +322,28 @@ func runForwarder(serviceIP string, servicePort int) {
 		logger.Infow("Forwarder process", "PID", cmd.Process)
 		forwarderProcess = cmd.Process
 		err = cmd.Wait()
+
 		if err != nil {
-			logger.Errorw("Forwarder exited", "Error", err)
+			logger.Infow("Forwarder exited", "Error", err)
 		}
-		// command is finished, now we check if it died or if it got canceled.
+		// command is finished, now we check if it died or if we killed it intentionally.
 		select {
 		case <-killForwarderChan:
-			logger.Infow("Old forwarder is killed on purpose")
+			logger.Infow("Forwarder was killed on purpose")
 			forwarderKilledChan <- struct{}{}
-			logger.Infow("Written to confirmation channel, returning")
+			logger.Debugw("Written to confirmation channel, returning")
 			return
 		default:
-			logger.Infow("Forwarder was not killed by this controller, restarting")
+			logger.Infow("Forwarder was not killed by this controller, restarting after backoff")
 			time.Sleep(backoffTimer)
 		}
 	}
 }
 
 func killForwarder() {
-	logger.Infow("Killing old forwarder, writing to kill channel")
-	killForwarderChan <- struct{}{}
 	logger.Infow("Killing process", "PID", forwarderProcess)
+	logger.Debugw("Writing to kill channel")
+	killForwarderChan <- struct{}{}
 	err := forwarderProcess.Kill()
 	if err != nil {
 		logger.Errorw("Could not kill process", "Error", err)
