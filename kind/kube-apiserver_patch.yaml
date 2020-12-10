@@ -1,7 +1,7 @@
 - op: add
   path: /spec/containers/1
   value:
-    image: mreiger/audit-forwarder
+    image: mreiger/audit-forwarder:pr-timed-loop
     imagePullPolicy: IfNotPresent
     name: audit-forwarder
     env:

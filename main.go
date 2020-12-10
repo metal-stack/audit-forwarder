@@ -32,10 +32,10 @@ import (
 const (
 	cfgFileType = "yaml"
 	moduleName  = "audit-forwarder"
-	// commandName = "/fluent-bit/bin/fluent-bit"
-	// commandArgs = "--config=/fluent-bit/etc/fluent-bit.conf"
-	commandName  = "sleep"
-	commandArgs  = "3600"
+	commandName = "/fluent-bit/bin/fluent-bit"
+	commandArgs = "--config=/fluent-bit/etc/fluent-bit.conf"
+	// commandName  = "sleep"
+	// commandArgs  = "3600"
 	backoffTimer = time.Duration(10 * time.Second)
 )
 
