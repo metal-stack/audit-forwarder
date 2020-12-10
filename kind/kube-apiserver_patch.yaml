@@ -2,7 +2,7 @@
   path: /spec/containers/1
   value:
     image: mreiger/audit-forwarder:pr-timed-loop
-    imagePullPolicy: IfNotPresent
+    imagePullPolicy: Always
     name: audit-forwarder
     env:
     - name: AUDIT_KUBECFG
