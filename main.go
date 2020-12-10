@@ -98,7 +98,7 @@ func init() {
 	log.Print("Function init() called.")
 	homedir, err := homedir.Dir()
 	if err != nil {
-		logger.Fatal(err)
+		log.Fatal(err)
 	}
 	log.Printf("Homedir variable homedir: %s", homedir)
 
@@ -114,7 +114,7 @@ func init() {
 
 	err = viper.BindPFlags(cmd.Flags())
 	if err != nil {
-		logger.Fatalw("unable to construct root command", "error", err)
+		log.Fatalf("unable to construct root command, error: %v", err)
 	}
 }
 
