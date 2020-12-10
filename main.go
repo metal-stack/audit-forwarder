@@ -231,7 +231,7 @@ func run(opts *Opts) error {
 		}
 
 		for _, e := range cronjob.Entries() {
-			logger.Infow("scheduling next service check", "at", e.Next.String())
+			logger.Debugw("scheduling next service check", "at", e.Next.String())
 		}
 	})
 	if err != nil {
@@ -245,7 +245,8 @@ func run(opts *Opts) error {
 		logger.Errorw("error during initial service check", "error", err)
 	}
 	cronjob.Start()
-	logger.Infow("scheduling next service check", "at", cronjob.Entry(id).Next.String())
+	logger.Infow("service-check interval", "check-schedule", opts.CheckSchedule)
+	logger.Debugw("scheduling next service check", "at", cronjob.Entry(id).Next.String())
 
 	<-stop
 	logger.Info("received stop signal, shutting down...")
