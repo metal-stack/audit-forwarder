@@ -87,7 +87,10 @@ var cmd = &cobra.Command{
 		}
 		initLogging()
 		initSignalHandlers()
-		run(opts)
+		err = run(opts)
+		if err != nil {
+			log.Printf("Main function run returned with error: %v", err)
+		}
 	},
 }
 
