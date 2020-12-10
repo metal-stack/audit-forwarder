@@ -281,6 +281,10 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 	}
 	logger.Infow("Service gotten", "service", service)
 	serviceIP := service.Spec.ClusterIP
+	if len(service.Spec.Ports) != 1 {
+		logger.Errorw("Service must have exactly one port", "Ports", service.Spec.Ports)
+		return errors.Errorf("Service must have exactly one port")
+	}
 	servicePort := service.Spec.Ports[0].Port
 	serviceResourceVersion := service.ObjectMeta.ResourceVersion
 	if targetService != nil { // This means a service was previously seen, and a forwarder should already be running.
