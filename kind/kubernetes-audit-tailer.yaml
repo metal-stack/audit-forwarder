@@ -20,18 +20,20 @@ spec:
       # it's better to disable the service links as the default args do not work properly otherwise (metal#64)
       enableServiceLinks: False
       containers:
-      - image: fluent/fluent-bit:1.6-debug  # debug image has busybox
+      - image: fluent/fluentd:v1.11
         imagePullPolicy: IfNotPresent
         name: kubernetes-audit-tailer
         env: []
+        # - name: FLUENTD_CONF
+        #   value: /fluentd/fluentd.conf
         ports:
         - containerPort: 24224
           protocol: TCP
         volumeMounts:
-        - name: fluent-bit-config
-          mountPath: /fluent-bit/etc/
+        - name: fluentd-config
+          mountPath: /fluentd/etc
       volumes:
-      - name: fluent-bit-config
+      - name: fluentd-config
         configMap:
           name: kubernetes-audit-tailer-config
 ---
@@ -43,24 +45,15 @@ metadata:
   labels:
     app.kubernetes.io/name: kubernetes-audit-tailer
 data:
-  fluent-bit.conf: |
-    [SERVICE]
-        Daemon       Off
-        Log_Level    info
-    [INPUT]
-        Name              forward
-        Listen            0.0.0.0
-        Port              24224
-        # Buffer_Chunk_Size 32KB
-        # Buffer_Max_Size   64KB
-        Buffer_Chunk_Size 128KB
-        Buffer_Max_Size   2MB
-
-    [OUTPUT]
-        Name            stdout
-        Format          json_lines
-        json_date_key   false
-        Match           *
+  fluent.conf: |
+    <source>
+      @type forward
+      port 24224
+      bind 0.0.0.0
+    </source>
+    <match **>
+      @type stdout
+    </match>
 ---
 apiVersion: v1
 kind: Service
@@ -75,4 +68,3 @@ spec:
   ports:
   - port: 24224
     targetPort: 24224
-
