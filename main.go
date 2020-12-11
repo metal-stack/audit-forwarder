@@ -70,7 +70,6 @@ type Opts struct {
 	KubeCfg       string
 	NameSpace     string
 	ServiceName   string
-	ServicePort   int
 	CheckSchedule string
 	LogLevel      string
 }
@@ -121,7 +120,6 @@ func initOpts() (*Opts, error) {
 		KubeCfg:       viper.GetString("kubecfg"),
 		NameSpace:     viper.GetString("namespace"),
 		ServiceName:   viper.GetString("service-name"),
-		ServicePort:   viper.GetInt("service-port"),
 		CheckSchedule: viper.GetString("check-schedule"),
 		LogLevel:      viper.GetString("log-level"),
 	}
