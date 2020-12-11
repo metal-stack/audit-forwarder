@@ -45,7 +45,6 @@ metadata:
 data:
   fluent-bit.conf: |
     [SERVICE]
-        Flush        1
         Daemon       Off
         Log_Level    info
     [INPUT]
@@ -62,3 +61,18 @@ data:
         Format          json_lines
         json_date_key   false
         Match           *
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubernetes-audit-tailer
+  namespace: kube-system
+  labels:
+    app: kubernetes-audit-tailer
+spec:
+  selector:
+    app: kubernetes-audit-tailer
+  ports:
+  - port: 24224
+    targetPort: 24224
+

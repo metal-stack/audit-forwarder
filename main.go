@@ -3,44 +3,135 @@ package main
 import (
 	"time"
 
+	"log"
+
 	"go.uber.org/zap"
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
+
 	k8s "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
 	"context"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/metal-stack/v"
 
 	"github.com/mitchellh/go-homedir"
+	"github.com/pkg/errors"
+	"github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"gopkg.in/go-playground/validator.v9"
 )
 
 const (
+	cfgFileType = "yaml"
 	moduleName  = "audit-forwarder"
-	namespace   = "kube-system"
-	podname     = "kubernetes-audit-tailer"
-	podport     = "24224"
 	commandName = "/fluent-bit/bin/fluent-bit"
 	commandArgs = "--config=/fluent-bit/etc/fluent-bit.conf"
+	// commandName  = "sleep"
+	// commandArgs  = "3600"
+	backoffTimer = time.Duration(10 * time.Second)
 )
 
-var rootCmd = &cobra.Command{
+var (
+	cfgFile             string
+	logger              *zap.SugaredLogger
+	stop                <-chan struct{}
+	targetService       *apiv1.Service
+	forwarderKilledChan chan struct{}
+	killForwarderChan   chan struct{}
+	forwarderProcess    *os.Process
+)
+
+// CronLogger is used for logging within the cron function.
+type CronLogger struct {
+	l *zap.SugaredLogger
+}
+
+// Info logs info messages from the cron function.
+func (c *CronLogger) Info(msg string, keysAndValues ...interface{}) {
+	c.l.Infow(msg, keysAndValues)
+}
+
+func (c *CronLogger) Error(err error, msg string, keysAndValues ...interface{}) {
+	c.l.Errorw(msg, keysAndValues)
+}
+
+// Opts is required in order to have proper validation for args from cobra and viper.
+// this is because MarkFlagRequired from cobra does not work well with viper, see:
+// https://github.com/spf13/viper/issues/397
+type Opts struct {
+	KubeCfg       string
+	NameSpace     string
+	ServiceName   string
+	CheckSchedule string
+	LogLevel      string
+}
+
+var cmd = &cobra.Command{
 	Use:     moduleName,
-	Short:   "a service that watches for an audit-tailer pod in the cluster and then starts the audit-forwarder with the right destination IP",
+	Short:   "A program to forward audit logs to a service in the cluster. It looks for a matching service, then starts a forwarder program (eg fluent-bit) to pick up the log events and do the actual forwarding.",
 	Version: v.V.String(),
 	Run: func(cmd *cobra.Command, args []string) {
-		run()
+		initConfig()
+		opts, err := initOpts()
+		if err != nil {
+			log.Fatalf("unable to init options, error: %v", err)
+		}
+		initLogging()
+		initSignalHandlers()
+		err = run(opts)
+		if err != nil {
+			log.Printf("run() function run returned with error: %v", err)
+		}
 	},
 }
 
-var logger *zap.SugaredLogger
+func init() {
+	homedir, err := homedir.Dir()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	cmd.Flags().StringP("log-level", "", "info", "sets the application log level")
+	cmd.Flags().StringVarP(&cfgFile, "config", "c", "", "alternative path to config file")
+
+	cmd.Flags().StringP("kubecfg", "k", homedir+"/.kube/config", "kubecfg path to the cluster to account")
+
+	cmd.Flags().StringP("namespace", "", "kube-system", "the namespace of the audit-tailer service")
+	cmd.Flags().StringP("service-name", "", "kubernetes-audit-tailer", "the service name of the audit-tailer service")
+	cmd.Flags().IntP("service-port", "", 24224, "the service port of the audit-tailer service")
+	cmd.Flags().StringP("check-schedule", "", "*/1 * * * *", "cron schedule when to check for service changes")
+
+	err = viper.BindPFlags(cmd.Flags())
+	if err != nil {
+		log.Fatalf("unable to construct root command, error: %v", err)
+	}
+}
+
+func initOpts() (*Opts, error) {
+	opts := &Opts{
+		KubeCfg:       viper.GetString("kubecfg"),
+		NameSpace:     viper.GetString("namespace"),
+		ServiceName:   viper.GetString("service-name"),
+		CheckSchedule: viper.GetString("check-schedule"),
+		LogLevel:      viper.GetString("log-level"),
+	}
+
+	validate := validator.New()
+	err := validate.Struct(opts)
+	if err != nil {
+		return nil, err
+	}
+
+	return opts, nil
+}
 
 func main() {
 	zap, _ := zap.NewProduction()
@@ -48,115 +139,119 @@ func main() {
 		_ = zap.Sync()
 	}()
 	logger = zap.Sugar()
-	if err := rootCmd.Execute(); err != nil {
+	if err := cmd.Execute(); err != nil {
 		logger.Error("Failed executing root command", "Error", err)
 	}
 }
 
-func init() {
+func initConfig() {
 	viper.SetEnvPrefix("audit")
-	homedir, err := homedir.Dir()
-	if err != nil {
-		logger.Fatal(err)
-	}
-	rootCmd.PersistentFlags().StringP("kubecfg", "k", homedir+"/.kube/config", "kubecfg path to the cluster to account")
-	rootCmd.PersistentFlags().Duration("fetch-interval", 10*time.Second, "interval for checking availability of target")
+	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 	viper.AutomaticEnv()
-	err = viper.BindPFlags(rootCmd.PersistentFlags())
-	if err != nil {
-		logger.Fatal(err)
+
+	viper.SetConfigType(cfgFileType)
+
+	if cfgFile != "" {
+		viper.SetConfigFile(cfgFile)
+		if err := viper.ReadInConfig(); err != nil {
+			logger.Errorw("Config file path set explicitly, but unreadable", "error", err)
+			os.Exit(1)
+		}
+	} else {
+		viper.SetConfigName("config")
+		viper.AddConfigPath("/etc/" + moduleName)
+		viper.AddConfigPath("$HOME/." + moduleName)
+		viper.AddConfigPath(".")
+		if err := viper.ReadInConfig(); err != nil {
+			usedCfg := viper.ConfigFileUsed()
+			if usedCfg != "" {
+				logger.Errorw("Config file unreadable", "config-file", usedCfg, "error", err)
+				os.Exit(1)
+			}
+		}
+	}
+
+	usedCfg := viper.ConfigFileUsed()
+	if usedCfg != "" {
+		logger.Infow("Read config file", "config-file", usedCfg)
 	}
 }
 
-func run() {
-	client, err := loadClient(viper.GetString("kubecfg"))
-	if err != nil {
-		logger.Fatalw("Unable to connect to k8s", "Error", err)
-	}
+func initLogging() {
+	level := zap.InfoLevel
 
-	fetchInterval := viper.GetDuration("fetch-interval")
-
-	// Apparently we now need to pass a context co k8s client API
-	kubectx, kubecancel := context.WithCancel(context.Background())
-	defer kubecancel()
-
-	// initialising variables used in pod loop
-	oldPodIP := ""
-	var oldPodDate time.Time
-	ctx, cancel := context.WithCancel(context.Background())
-	forwarderKilled := make(chan struct{})
-
-	logger.Infow("Initial old values", "oldPodIP", oldPodIP, "oldPodDate", oldPodDate)
-
-	labelMap := map[string]string{"app": podname}
-	opts := metav1.ListOptions{
-		LabelSelector: labels.SelectorFromSet(labelMap).String(),
-	}
-	for {
-		watcher, err := client.CoreV1().Pods(namespace).Watch(kubectx, opts)
+	if viper.IsSet("log-level") {
+		err := level.UnmarshalText([]byte(viper.GetString("log-level")))
 		if err != nil {
-			logger.Fatalw("Could not watch for pods", "Error", err)
-		}
-		for event := range watcher.ResultChan() {
-			p, ok := event.Object.(*apiv1.Pod)
-			if !ok {
-				logger.Error("Unexpected type")
-				continue
-			}
-			podIP := p.Status.PodIP
-			logger.Infow("Pod change detected", "old IP", oldPodIP, "new IP", podIP)
-			if podIP != "" && oldPodIP != podIP {
-				podDate := p.Status.StartTime.Time
-				logger.Infow("Pod dates", "old", oldPodDate, "new", podDate)
-				if podDate.After(oldPodDate) {
-					logger.Infow("Newer pod detected, (re-)starting forwarder")
-					if oldPodIP != "" {
-						logger.Infow("Killing old forwarder")
-						cancel()
-						// Wait for the old forwarder to exit
-						<-forwarderKilled
-						// Create new context
-						ctx, cancel = context.WithCancel(context.Background())
-					}
-
-					go func() {
-						for {
-
-							logger.Info("Building forwarder command")
-
-							cmd := exec.CommandContext(ctx, commandName, commandArgs)
-							cmd.Stdout = os.Stdout // Lets us see stdout and stderr of cmd
-							cmd.Stderr = os.Stderr
-							cmd.Env = append(os.Environ(),
-								"AUDIT_TAILER_HOST="+podIP,
-								"AUDIT_TAILER_PORT="+podport,
-							)
-							logger.Infow("Executing:", "Command", strings.Join(cmd.Args, " "), ", Environment:", strings.Join(cmd.Env, ", "))
-
-							err := cmd.Run()
-							if err != nil {
-								logger.Errorw("Forwarder exited", "Error", err)
-							}
-							// command is finished, now we check if it died or if it got canceled.
-							select {
-							case <-ctx.Done():
-								logger.Infow("Old forwarder is killed, returning", "Error", ctx.Err())
-								forwarderKilled <- struct{}{}
-								return
-							default:
-								logger.Infow("Forwarder was not killed by this controller, restarting")
-								time.Sleep(fetchInterval)
-							}
-						}
-					}()
-
-					oldPodIP = podIP
-					oldPodDate = podDate
-				}
-			}
-			logger.Info("Pod change handled")
+			log.Fatalf("can't initialize zap logger: %v", err)
 		}
 	}
+
+	cfg := zap.NewProductionConfig()
+	cfg.Level = zap.NewAtomicLevelAt(level)
+
+	log.Printf("Log level: %s", cfg.Level)
+
+	l, err := cfg.Build()
+	if err != nil {
+		log.Fatalf("can't initialize zap logger: %v", err)
+	}
+
+	logger = l.Sugar()
+}
+
+func initSignalHandlers() {
+	stop = signals.SetupSignalHandler()
+}
+
+func run(opts *Opts) error {
+	logger.Debugw("Options", "opts", opts)
+	// initialise our synchronisation channels
+	forwarderKilledChan = make(chan struct{})
+	killForwarderChan = make(chan struct{}, 1)
+
+	// Prepare K8s
+	client, err := loadClient(opts.KubeCfg)
+	if err != nil {
+		logger.Errorw("Unable to connect to k8s", "Error", err)
+		return err
+	}
+
+	// Set up (and run) cron job
+	cronjob := cron.New(cron.WithChain(
+		cron.SkipIfStillRunning(&CronLogger{l: logger.Named("cron")}),
+	))
+
+	id, err := cronjob.AddFunc(opts.CheckSchedule, func() {
+		err := checkService(opts, client)
+		if err != nil {
+			logger.Errorw("error during service check", "error", err)
+		}
+
+		for _, e := range cronjob.Entries() {
+			logger.Debugw("scheduling next service check", "at", e.Next.String())
+		}
+	})
+	if err != nil {
+		return errors.Wrap(err, "could not initialize cron schedule")
+	}
+
+	logger.Infow("start service check", "version", v.V.String())
+
+	err = checkService(opts, client)
+	if err != nil {
+		logger.Errorw("error during initial service check", "error", err)
+	}
+	cronjob.Start()
+	logger.Infow("service-check interval", "check-schedule", opts.CheckSchedule)
+	logger.Debugw("scheduling next service check", "at", cronjob.Entry(id).Next.String())
+
+	<-stop
+	logger.Info("received stop signal, shutting down...")
+
+	cronjob.Stop()
+	return nil
+
 }
 
 func loadClient(kubeconfigPath string) (*k8s.Clientset, error) {
@@ -165,4 +260,94 @@ func loadClient(kubeconfigPath string) (*k8s.Clientset, error) {
 		return nil, err
 	}
 	return k8s.NewForConfig(config)
+}
+
+func checkService(opts *Opts, client *k8s.Clientset) error {
+	logger.Debugw("Checking service")
+	// logger.Debugw("Current service", "targetService", targetService)
+
+	kubectx, kubecancel := context.WithTimeout(context.Background(), time.Duration(10*time.Second))
+	defer kubecancel()
+	service, err := client.CoreV1().Services(opts.NameSpace).Get(kubectx, opts.ServiceName, metav1.GetOptions{})
+	if err != nil { // That means no matching service found
+		if targetService != nil { // This means a service was previously seen, and a forwarder should already be running.
+			logger.Infow("Service went away, killing forwarder")
+			killForwarder()
+			targetService = nil
+		}
+		return err
+	}
+
+	// logger.Debugw("Service gotten", "service", service)
+	serviceIP := service.Spec.ClusterIP
+	if len(service.Spec.Ports) != 1 {
+		logger.Errorw("Service must have exactly one port", "Ports", service.Spec.Ports)
+		return errors.Errorf("Service must have exactly one port")
+	}
+	servicePort := service.Spec.Ports[0].Port
+
+	if targetService != nil { // This means a service was previously seen, and a forwarder should already be running.
+		if targetService.Spec.ClusterIP == service.Spec.ClusterIP && targetService.Spec.Ports[0].Port == service.Spec.Ports[0].Port {
+			logger.Debugw("Service stayed the same, nothing to do.")
+			return nil
+		}
+		// We need to kill the old forwarder
+		killForwarder()
+	}
+
+	logger.Infow("Target identified", "IP", serviceIP, "Port", servicePort)
+	go runForwarder(serviceIP, int(servicePort))
+	targetService = service
+	return nil
+}
+
+func runForwarder(serviceIP string, servicePort int) {
+	for {
+		logger.Info("Starting forwarder")
+
+		cmd := exec.Command(commandName, commandArgs)
+		cmd.Stdout = os.Stdout // Lets us see stdout and stderr of cmd
+		cmd.Stderr = os.Stderr
+		cmd.Env = append(os.Environ(),
+			"AUDIT_TAILER_HOST="+serviceIP,
+			"AUDIT_TAILER_PORT="+strconv.Itoa(servicePort),
+		)
+		logger.Debugw("Executing:", "Command", strings.Join(cmd.Args, " "), ", Environment:", strings.Join(cmd.Env, ", "))
+
+		err := cmd.Start()
+		if err != nil {
+			logger.Errorw("Could not start forwarder", "Error", err)
+		}
+		logger.Infow("Forwarder process", "PID", cmd.Process)
+		forwarderProcess = cmd.Process
+		err = cmd.Wait()
+
+		if err != nil {
+			logger.Infow("Forwarder exited", "Error", err)
+		}
+		// command is finished, now we check if it died or if we killed it intentionally.
+		select {
+		case <-killForwarderChan:
+			logger.Infow("Forwarder was killed on purpose")
+			forwarderKilledChan <- struct{}{}
+			logger.Debugw("Written to confirmation channel, returning")
+			return
+		default:
+			logger.Infow("Forwarder was not killed by this controller, restarting after backoff")
+			time.Sleep(backoffTimer)
+		}
+	}
+}
+
+func killForwarder() {
+	logger.Infow("Killing process", "PID", forwarderProcess)
+	logger.Debugw("Writing to kill channel")
+	killForwarderChan <- struct{}{}
+	err := forwarderProcess.Kill()
+	if err != nil {
+		logger.Errorw("Could not kill process", "Error", err)
+	}
+	// Wait for the old forwarder to exit
+	<-forwarderKilledChan
+	logger.Infow("Forwarder successfully killed")
 }
