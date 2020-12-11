@@ -216,7 +216,7 @@ func run(opts *Opts) error {
 	client, err := loadClient(opts.KubeCfg)
 	if err != nil {
 		logger.Errorw("Unable to connect to k8s", "Error", err)
-		os.Exit(1)
+		return err
 	}
 
 	// Set up (and run) cron job
