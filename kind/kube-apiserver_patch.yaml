@@ -13,6 +13,7 @@
     - mountPath: /kube.config
       name: kubeconfig
     - mountPath: /fluent-bit/etc/ssl
+      name: forwarder-certs
 - op: add
   path: /spec/volumes/0
   value:
