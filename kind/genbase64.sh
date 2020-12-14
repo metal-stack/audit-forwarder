@@ -9,8 +9,18 @@ FLUENTD_CERT=$(cat $CERTDIR/fluentd-crt.pem | base64 | tr -d '\n')
 FORWARDER_KEY=$(cat $CERTDIR/forwarder-key.pem | base64 | tr -d '\n')
 FORWARDER_CERT=$(cat $CERTDIR/forwarder-crt.pem | base64 | tr -d '\n')
 
-echo "ca.crt: $CA_BUNDLE"
-echo "fluentd.crt: $FLUENTD_CERT"
-echo "fluentd.key: $FLUENTD_KEY"
-echo "forwarder.crt: $FORWARDER_CERT"
-echo "forwarder.key: $FORWARDER_KEY"
+cat <<EOF >$CERTDIR/cert-secret.yaml
+---
+apiVersion: v1
+data:
+  ca.crt: $CA_BUNDLE
+  fluentd.crt: $FLUENTD_CERT
+  fluentd.key: $FLUENTD_KEY
+  forwarder.crt: $FORWARDER_CERT
+  forwarder.key: $FORWARDER_KEY
+kind: Secret
+metadata:
+  name: cert-secret
+  namespace: kube-system
+type: Opaque
+EOF

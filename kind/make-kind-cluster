@@ -20,6 +20,9 @@ cp -R audit/ kind-etc-kubernetes/audit/
 kind create cluster --config multinodecluster-with-auditlog.yaml
 kind export kubeconfig --kubeconfig kube.config
 
+# Apply the certificates (and keys) secret
+kubectl apply -f certs/cert-secret.yaml
+
 echo "Cluster created, before the next step execute:"
 echo "chown -R <user>:<group> kind-etc-kubernetes"
 echo "as root, and then"
