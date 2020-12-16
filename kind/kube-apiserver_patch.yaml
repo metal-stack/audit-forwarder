@@ -24,6 +24,7 @@
 - op: add
   path: /spec/volumes/0
   value:
+    hostPath:
+      path: /etc/kubernetes/audit/ssl
+      type: Directory
     name: forwarder-certs
-    secret:
-      secretName: cert-secret

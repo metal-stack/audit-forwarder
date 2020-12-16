@@ -4,6 +4,7 @@ CERTDIR=certs
 
 # INJECT CA IN THE WEBHOOK CONFIGURATION
 CA_BUNDLE=$(cat $CERTDIR/ca.crt | base64 | tr -d '\n')
+CA_KEY=$(cat $CERTDIR/ca.key | base64 | tr -d '\n')
 FLUENTD_KEY=$(cat $CERTDIR/fluentd-key.pem | base64 | tr -d '\n')
 FLUENTD_CERT=$(cat $CERTDIR/fluentd-crt.pem | base64 | tr -d '\n')
 FORWARDER_KEY=$(cat $CERTDIR/forwarder-key.pem | base64 | tr -d '\n')
@@ -14,6 +15,7 @@ cat <<EOF >$CERTDIR/cert-secret.yaml
 apiVersion: v1
 data:
   ca.crt: $CA_BUNDLE
+  ca.key: $CA_KEY
   fluentd.crt: $FLUENTD_CERT
   fluentd.key: $FLUENTD_KEY
   forwarder.crt: $FORWARDER_CERT

@@ -56,12 +56,16 @@ data:
       port 24224
       bind 0.0.0.0
       <transport tls>
-        cert_path /fluentd/etc/certs/fluentd.crt
-        private_key_path /fluentd/etc/certs/fluentd.key
-        # private_key_passphrase YOUR_PASSPHRASE
-        client_cert_auth true
-        ca_path /fluentd/etc/certs/ca.crt
+        ca_path                   /fluentd/etc/certs/ca.crt
+        cert_path                 /fluentd/etc/certs/fluentd.crt
+        private_key_path          /fluentd/etc/certs/fluentd.key
+        # private_key_passphrase  YOUR_PASSPHRASE
+        client_cert_auth          true
       </transport>
+      <security>
+        self_hostname             kubernetes-audit-tailer
+        shared_key                audit
+      </security>
     </source>
     <match **>
       @type stdout

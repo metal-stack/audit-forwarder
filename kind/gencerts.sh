@@ -22,7 +22,7 @@ openssl req -new -x509 -key $CERTDIR/ca.key -out $CERTDIR/ca.crt -config $CERTDI
 openssl genrsa -out $CERTDIR/fluentd-key.pem 2048
 
 # CREATE A CSR FROM THE CONFIGURATION FILE AND OUR PRIVATE KEY
-openssl req -new -key $CERTDIR/fluentd-key.pem -subj "/CN=fluentd.kube-system.svc" -out $CERTDIR/fluentd.csr -config $CERTDIR/ca-config.txt
+openssl req -new -key $CERTDIR/fluentd-key.pem -subj "/CN=kubernetes-audit-tailer" -out $CERTDIR/fluentd.csr -config $CERTDIR/ca-config.txt
 
 # CREATE THE CERT SIGNING THE CSR WITH THE CA CREATED BEFORE
 openssl x509 -req -in $CERTDIR/fluentd.csr -CA $CERTDIR/ca.crt -CAkey $CERTDIR/ca.key -CAcreateserial -out $CERTDIR/fluentd-crt.pem
@@ -31,7 +31,7 @@ openssl x509 -req -in $CERTDIR/fluentd.csr -CA $CERTDIR/ca.crt -CAkey $CERTDIR/c
 openssl genrsa -out $CERTDIR/forwarder-key.pem 2048
 
 # CREATE A CSR FROM THE CONFIGURATION FILE AND OUR PRIVATE KEY
-openssl req -new -key $CERTDIR/forwarder-key.pem -subj "/CN=forwarder" -out $CERTDIR/forwarder.csr -config $CERTDIR/ca-config.txt
+openssl req -new -key $CERTDIR/forwarder-key.pem -subj "/CN=kubernetes-audit-forwarder" -out $CERTDIR/forwarder.csr -config $CERTDIR/ca-config.txt
 
 # CREATE THE CERT SIGNING THE CSR WITH THE CA CREATED BEFORE
 openssl x509 -req -in $CERTDIR/forwarder.csr -CA $CERTDIR/ca.crt -CAkey $CERTDIR/ca.key -CAcreateserial -out $CERTDIR/forwarder-crt.pem

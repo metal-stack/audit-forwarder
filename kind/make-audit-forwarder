@@ -15,8 +15,13 @@ apiserver=${line##*kubeadm.kubernetes.io\/kube-apiserver.advertise-address.endpo
 sed "s+https://.*$+https://$apiserver+" kube.config >kind-etc-kubernetes/audit/kube.config
 
 # Copy the certs file in place
-echo "Copying certs manifest"
-cp certs/cert-secret.yaml kind-etc-kubernetes/manifests/
+echo "Copying certs"
+if [ ! -d kind-etc-kubernetes/audit/ssl ]; then
+    mkdir kind-etc-kubernetes/audit/ssl
+fi
+cp certs/ca.crt kind-etc-kubernetes/audit/ssl/ca.crt
+cp certs/forwarder-crt.pem kind-etc-kubernetes/audit/ssl/forwarder.crt
+cp certs/forwarder-key.pem kind-etc-kubernetes/audit/ssl/forwarder.key
 
 # Wait a little so there's no timing problem
 sleep 5
