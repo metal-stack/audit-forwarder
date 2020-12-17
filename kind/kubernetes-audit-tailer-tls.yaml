@@ -62,10 +62,10 @@ data:
         # private_key_passphrase  YOUR_PASSPHRASE
         client_cert_auth          true
       </transport>
-      <security>
-        self_hostname             kubernetes-audit-tailer
-        shared_key                audit
-      </security>
+      # <security>
+      #   self_hostname             kubernetes-audit-tailer
+      #   shared_key                audit
+      # </security>
     </source>
     <match **>
       @type stdout
