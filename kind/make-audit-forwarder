@@ -1,8 +1,21 @@
 #!/bin/sh
-#
-# First get the kube-apiserver manifest:
 
-cp kind-etc-kubernetes/manifests/kube-apiserver.yaml .
+# First check if a forwarder has already been applied and get the kube-apiserver manifest if it isn't.
+if grep forwarder kind-etc-kubernetes/manifests/kube-apiserver.yaml >/dev/null; then
+    echo "Forwarder config already applied."
+    if [ ! -f kube-apiserver.yaml ]; then
+        echo "No saved kube-apiserver manifest exists, exiting."
+        exit
+    else
+        if grep forwarder kube-apiserver.yaml >/dev/null; then
+            echo "Saved config contains forwarder too, can not patch. Exiting."
+            exit
+        fi
+    fi
+else
+    echo "Getting kube-apiserver manifest."
+    cp kind-etc-kubernetes/manifests/kube-apiserver.yaml .
+fi
 
 # Patch the generated kind kubeconfig with the apiserver URL valid from within the cluster.
 
@@ -19,11 +32,12 @@ echo "Copying certs"
 if [ ! -d kind-etc-kubernetes/audit/ssl ]; then
     mkdir kind-etc-kubernetes/audit/ssl
 fi
-cp certs/ca.crt kind-etc-kubernetes/audit/ssl/ca.crt
-cp certs/forwarder-crt.pem kind-etc-kubernetes/audit/ssl/forwarder.crt
-cp certs/forwarder-key.pem kind-etc-kubernetes/audit/ssl/forwarder.key
+cp certs/ca.crt kind-etc-kubernetes/audit/ssl/
+cp certs/forwarder.crt kind-etc-kubernetes/audit/ssl/
+cp certs/forwarder.key kind-etc-kubernetes/audit/ssl/
 
 # Wait a little so there's no timing problem
+echo "Waiting a bit"
 sleep 5
 
 echo "Patching and applying the kube-apiserver manifest:"
