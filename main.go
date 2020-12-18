@@ -116,7 +116,7 @@ func init() {
 	cmd.Flags().StringP("tls-crt-file", "R", "/fluent-bit/etc/ssl/forwarder.crt", "the path to the client certificate used to authenticate to the audit-tailer")
 	cmd.Flags().StringP("tls-key-file", "K", "/fluent-bit/etc/ssl/forwarder.key", "the path to the private key file belonging to the client certificate")
 	cmd.Flags().StringP("tls-vhost", "H", "kubernetes-audit-tailer", "the name of the audit-tailer, as presented in its server certificate. This is needed so that the certificate is accepted by fluent-bit")
-	cmd.Flags().StringP("check-schedule", "C", "*/1 * * * *", "cron schedule when to check for service changes")
+	cmd.Flags().StringP("check-schedule", "S", "*/1 * * * *", "cron schedule when to check for service changes")
 	cmd.Flags().DurationP("backoff-timer", "B", time.Duration(10*time.Second), "Backoff time for restarting the forwarder process when it has been killed by external influences")
 	cmd.Flags().StringP("log-level", "L", "info", "sets the application log level")
 
