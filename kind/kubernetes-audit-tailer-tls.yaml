@@ -19,6 +19,8 @@ spec:
     spec:
       # it's better to disable the service links as the default args do not work properly otherwise (metal#64)
       enableServiceLinks: False
+      securityContext:
+        runAsUser: 1000
       containers:
       - image: fluent/fluentd:v1.11
         imagePullPolicy: IfNotPresent
