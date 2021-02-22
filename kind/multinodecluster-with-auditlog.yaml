@@ -23,7 +23,7 @@ kubeadmConfigPatches:
       pathType: Directory
       readOnly: False
       hostPath: /var/log/audit
-      mountPath: /audit
+      mountPath: /auditlog
 nodes:
 - role: control-plane
   extraMounts:
