@@ -234,6 +234,13 @@ func run(opts *Opts) error {
 	forwarderKilledChan = make(chan struct{})
 	killForwarderChan = make(chan struct{}, 1)
 
+	// set up certificates directory
+	err := os.MkdirAll(opts.TLSBaseDir, 0750)
+	if err != nil {
+		logger.Errorw("Unable to create certificate directory", opts.TLSBaseDir, err)
+		return err
+	}
+
 	// Prepare K8s
 	client, err := loadClient(opts.KubeCfg)
 	if err != nil {
