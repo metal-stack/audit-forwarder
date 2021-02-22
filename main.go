@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -36,12 +37,12 @@ const (
 	commandArgs = "--config=/fluent-bit/etc/fluent-bit.conf"
 	// commandName  = "sleep"
 	// commandArgs  = "3600"
-	backoffTimer = time.Duration(10 * time.Second)
 )
 
 var (
 	cfgFile             string
 	logger              *zap.SugaredLogger
+	logLevel            zapcore.Level
 	stop                <-chan struct{}
 	targetService       *apiv1.Service
 	forwarderKilledChan chan struct{}
@@ -70,7 +71,13 @@ type Opts struct {
 	KubeCfg       string
 	NameSpace     string
 	ServiceName   string
+	AuditLogPath  string
+	TLSCaFile     string
+	TLSCrtFile    string
+	TLSKeyFile    string
+	TLSVhost      string
 	CheckSchedule string
+	BackoffTimer  time.Duration
 	LogLevel      string
 }
 
@@ -84,7 +91,7 @@ var cmd = &cobra.Command{
 		if err != nil {
 			log.Fatalf("unable to init options, error: %v", err)
 		}
-		initLogging()
+		initLogging(opts)
 		initSignalHandlers()
 		err = run(opts)
 		if err != nil {
@@ -99,15 +106,19 @@ func init() {
 		log.Fatal(err)
 	}
 
-	cmd.Flags().StringP("log-level", "", "info", "sets the application log level")
 	cmd.Flags().StringVarP(&cfgFile, "config", "c", "", "alternative path to config file")
 
 	cmd.Flags().StringP("kubecfg", "k", homedir+"/.kube/config", "kubecfg path to the cluster to account")
-
-	cmd.Flags().StringP("namespace", "", "kube-system", "the namespace of the audit-tailer service")
-	cmd.Flags().StringP("service-name", "", "kubernetes-audit-tailer", "the service name of the audit-tailer service")
-	cmd.Flags().IntP("service-port", "", 24224, "the service port of the audit-tailer service")
-	cmd.Flags().StringP("check-schedule", "", "*/1 * * * *", "cron schedule when to check for service changes")
+	cmd.Flags().StringP("namespace", "n", "kube-system", "the namespace of the audit-tailer service")
+	cmd.Flags().StringP("service-name", "s", "kubernetes-audit-tailer", "the service name of the audit-tailer service")
+	cmd.Flags().StringP("audit-log-path", "l", "/audit", "the path to the directory containing the audit-log files")
+	cmd.Flags().StringP("tls-ca-file", "C", "/fluent-bit/etc/ssl/ca.crt", "the path to the CA file for checking the server (audit-tailer) certificate")
+	cmd.Flags().StringP("tls-crt-file", "R", "/fluent-bit/etc/ssl/forwarder.crt", "the path to the client certificate used to authenticate to the audit-tailer")
+	cmd.Flags().StringP("tls-key-file", "K", "/fluent-bit/etc/ssl/forwarder.key", "the path to the private key file belonging to the client certificate")
+	cmd.Flags().StringP("tls-vhost", "H", "kubernetes-audit-tailer", "the name of the audit-tailer, as presented in its server certificate. This is needed so that the certificate is accepted by fluent-bit")
+	cmd.Flags().StringP("check-schedule", "S", "*/1 * * * *", "cron schedule when to check for service changes")
+	cmd.Flags().DurationP("backoff-timer", "B", time.Duration(10*time.Second), "Backoff time for restarting the forwarder process when it has been killed by external influences")
+	cmd.Flags().StringP("log-level", "L", "info", "sets the application log level")
 
 	err = viper.BindPFlags(cmd.Flags())
 	if err != nil {
@@ -120,7 +131,13 @@ func initOpts() (*Opts, error) {
 		KubeCfg:       viper.GetString("kubecfg"),
 		NameSpace:     viper.GetString("namespace"),
 		ServiceName:   viper.GetString("service-name"),
+		AuditLogPath:  viper.GetString("audit-log-path"),
+		TLSCaFile:     viper.GetString("tls-ca-file"),
+		TLSCrtFile:    viper.GetString("tls-crt-file"),
+		TLSKeyFile:    viper.GetString("tls-key-file"),
+		TLSVhost:      viper.GetString("tls-vhost"),
 		CheckSchedule: viper.GetString("check-schedule"),
+		BackoffTimer:  viper.GetDuration("backoff-timer"),
 		LogLevel:      viper.GetString("log-level"),
 	}
 
@@ -177,18 +194,14 @@ func initConfig() {
 	}
 }
 
-func initLogging() {
-	level := zap.InfoLevel
-
-	if viper.IsSet("log-level") {
-		err := level.UnmarshalText([]byte(viper.GetString("log-level")))
-		if err != nil {
-			log.Fatalf("can't initialize zap logger: %v", err)
-		}
+func initLogging(opts *Opts) {
+	err := logLevel.UnmarshalText([]byte(opts.LogLevel))
+	if err != nil {
+		log.Fatalf("can't initialize zap logger: %v", err)
 	}
 
 	cfg := zap.NewProductionConfig()
-	cfg.Level = zap.NewAtomicLevelAt(level)
+	cfg.Level = zap.NewAtomicLevelAt(logLevel)
 
 	log.Printf("Log level: %s", cfg.Level)
 
@@ -296,21 +309,28 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 	}
 
 	logger.Infow("Target identified", "IP", serviceIP, "Port", servicePort)
-	go runForwarder(serviceIP, int(servicePort))
+	go runForwarder(serviceIP, int(servicePort), opts)
 	targetService = service
 	return nil
 }
 
-func runForwarder(serviceIP string, servicePort int) {
+func runForwarder(serviceIP string, servicePort int, opts *Opts) {
 	for {
 		logger.Info("Starting forwarder")
 
 		cmd := exec.Command(commandName, commandArgs)
 		cmd.Stdout = os.Stdout // Lets us see stdout and stderr of cmd
 		cmd.Stderr = os.Stderr
+
 		cmd.Env = append(os.Environ(),
 			"AUDIT_TAILER_HOST="+serviceIP,
 			"AUDIT_TAILER_PORT="+strconv.Itoa(servicePort),
+			"AUDIT_LOG_PATH="+opts.AuditLogPath,
+			"TLS_CA_FILE="+opts.TLSCaFile,
+			"TLS_CRT_FILE="+opts.TLSCrtFile,
+			"TLS_KEY_FILE="+opts.TLSKeyFile,
+			"TLS_VHOST="+opts.TLSVhost,
+			"LOG_LEVEL="+logLevel.String(),
 		)
 		logger.Debugw("Executing:", "Command", strings.Join(cmd.Args, " "), ", Environment:", strings.Join(cmd.Env, ", "))
 
@@ -333,8 +353,8 @@ func runForwarder(serviceIP string, servicePort int) {
 			logger.Debugw("Written to confirmation channel, returning")
 			return
 		default:
-			logger.Infow("Forwarder was not killed by this controller, restarting after backoff")
-			time.Sleep(backoffTimer)
+			logger.Infow("Forwarder was not killed by this controller, restarting", "Backoff time", opts.BackoffTimer)
+			time.Sleep(opts.BackoffTimer)
 		}
 	}
 }

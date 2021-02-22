@@ -19,6 +19,8 @@ spec:
     spec:
       # it's better to disable the service links as the default args do not work properly otherwise (metal#64)
       enableServiceLinks: False
+      securityContext:
+        runAsUser: 1000
       containers:
       - image: fluent/fluentd:v1.11
         imagePullPolicy: IfNotPresent
@@ -32,10 +34,15 @@ spec:
         volumeMounts:
         - name: fluentd-config
           mountPath: /fluentd/etc
+        - name: fluentd-certs
+          mountPath: /fluentd/etc/ssl
       volumes:
       - name: fluentd-config
         configMap:
           name: kubernetes-audit-tailer-config
+      - name: fluentd-certs
+        secret:
+          secretName: tailer-certs
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -50,6 +57,13 @@ data:
       @type forward
       port 24224
       bind 0.0.0.0
+      <transport tls>
+        ca_path                   /fluentd/etc/ssl/ca.crt
+        cert_path                 /fluentd/etc/ssl/tailer.crt
+        private_key_path          /fluentd/etc/ssl/tailer.key
+        # private_key_passphrase  YOUR_PASSPHRASE
+        client_cert_auth          true
+      </transport>
     </source>
     <match **>
       @type stdout
