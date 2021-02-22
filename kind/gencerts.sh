@@ -47,13 +47,23 @@ cat <<EOF >$CERTDIR/tailer-certs.yaml
 ---
 apiVersion: v1
 data:
-  ca.key: $CA_KEY
   ca.crt: $CA_BUNDLE
-  tailer.key: $TAILER_KEY
-  tailer.crt: $TAILER_CERT
+  audittailer-server.key: $TAILER_KEY
+  audittailer-server.crt: $TAILER_CERT
 kind: Secret
 metadata:
-  name: tailer-certs
+  name: audittailer-server
+  namespace: kube-system
+type: Opaque
+---
+apiVersion: v1
+data:
+  ca.crt: $CA_BUNDLE
+  audittailer-client.key: $TAILER_KEY
+  audittailer-client.crt: $TAILER_CERT
+kind: Secret
+metadata:
+  name: audittailer-client
   namespace: kube-system
 type: Opaque
 EOF
