@@ -51,8 +51,8 @@ var (
 	forwarderKilledChan chan struct{}
 	killForwarderChan   chan struct{}
 	forwarderProcess    *os.Process
-	secretCronId        cron.EntryID
-	serviceCronId       cron.EntryID
+	secretCronID        cron.EntryID
+	serviceCronID       cron.EntryID
 )
 
 // CronLogger is used for logging within the cron function.
@@ -73,19 +73,20 @@ func (c *CronLogger) Error(err error, msg string, keysAndValues ...interface{}) 
 // this is because MarkFlagRequired from cobra does not work well with viper, see:
 // https://github.com/spf13/viper/issues/397
 type Opts struct {
-	KubeCfg       string
-	NameSpace     string
-	ServiceName   string
-	SecretName    string
-	AuditLogPath  string
-	TLSBaseDir    string
-	TLSCaFile     string
-	TLSCrtFile    string
-	TLSKeyFile    string
-	TLSVhost      string
-	CheckSchedule string
-	BackoffTimer  time.Duration
-	LogLevel      string
+	KubeCfg        string
+	NameSpace      string
+	ServiceName    string
+	SecretName     string
+	AuditLogPath   string
+	TLSBaseDir     string
+	TLSCaFile      string
+	TLSCrtFile     string
+	TLSKeyFile     string
+	TLSVhost       string
+	CheckSchedule  string
+	BackoffTimer   time.Duration
+	LogLevel       string
+	FluentLogLevel string
 }
 
 var cmd = &cobra.Command{
@@ -128,6 +129,7 @@ func init() {
 	cmd.Flags().StringP("check-schedule", "S", "*/1 * * * *", "cron schedule when to check for service changes")
 	cmd.Flags().DurationP("backoff-timer", "b", time.Duration(10*time.Second), "Backoff time for restarting the forwarder process when it has been killed by external influences")
 	cmd.Flags().StringP("log-level", "L", "info", "sets the application log level")
+	cmd.Flags().StringP("fluent-log-level", "O", "info", "sets the log level for the fluent-bit command")
 
 	err = viper.BindPFlags(cmd.Flags())
 	if err != nil {
@@ -137,19 +139,20 @@ func init() {
 
 func initOpts() (*Opts, error) {
 	opts := &Opts{
-		KubeCfg:       viper.GetString("kubecfg"),
-		NameSpace:     viper.GetString("namespace"),
-		ServiceName:   viper.GetString("service-name"),
-		SecretName:    viper.GetString("secret-name"),
-		AuditLogPath:  viper.GetString("audit-log-path"),
-		TLSBaseDir:    viper.GetString("tls-basedir"),
-		TLSCaFile:     viper.GetString("tls-ca-file"),
-		TLSCrtFile:    viper.GetString("tls-crt-file"),
-		TLSKeyFile:    viper.GetString("tls-key-file"),
-		TLSVhost:      viper.GetString("tls-vhost"),
-		CheckSchedule: viper.GetString("check-schedule"),
-		BackoffTimer:  viper.GetDuration("backoff-timer"),
-		LogLevel:      viper.GetString("log-level"),
+		KubeCfg:        viper.GetString("kubecfg"),
+		NameSpace:      viper.GetString("namespace"),
+		ServiceName:    viper.GetString("service-name"),
+		SecretName:     viper.GetString("secret-name"),
+		AuditLogPath:   viper.GetString("audit-log-path"),
+		TLSBaseDir:     viper.GetString("tls-basedir"),
+		TLSCaFile:      viper.GetString("tls-ca-file"),
+		TLSCrtFile:     viper.GetString("tls-crt-file"),
+		TLSKeyFile:     viper.GetString("tls-key-file"),
+		TLSVhost:       viper.GetString("tls-vhost"),
+		CheckSchedule:  viper.GetString("check-schedule"),
+		BackoffTimer:   viper.GetDuration("backoff-timer"),
+		LogLevel:       viper.GetString("log-level"),
+		FluentLogLevel: viper.GetString("fluent-log-level"),
 	}
 
 	validate := validator.New()
@@ -253,24 +256,24 @@ func run(opts *Opts) error {
 		cron.SkipIfStillRunning(&CronLogger{l: logger.Named("cron")}),
 	))
 
-	secretCronId, err = cronjob.AddFunc(opts.CheckSchedule, func() {
+	secretCronID, err = cronjob.AddFunc(opts.CheckSchedule, func() {
 		err := checkSecret(opts, client)
 		if err != nil {
 			logger.Errorw("error during secret check", "error", err)
 		}
 
-		logger.Debugw("scheduling next secret check", "at", cronjob.Entry(secretCronId).Next)
+		logger.Debugw("scheduling next secret check", "at", cronjob.Entry(secretCronID).Next)
 	})
 	if err != nil {
 		return errors.Wrap(err, "could not initialize cron schedule")
 	}
-	serviceCronId, err = cronjob.AddFunc(opts.CheckSchedule, func() {
+	serviceCronID, err = cronjob.AddFunc(opts.CheckSchedule, func() {
 		err := checkService(opts, client)
 		if err != nil {
 			logger.Errorw("error during service check", "error", err)
 		}
 
-		logger.Debugw("scheduling next service check", "at", cronjob.Entry(serviceCronId).Next)
+		logger.Debugw("scheduling next service check", "at", cronjob.Entry(serviceCronID).Next)
 	})
 	if err != nil {
 		return errors.Wrap(err, "could not initialize cron schedule")
@@ -355,6 +358,12 @@ func runForwarder(serviceIP string, servicePort int, opts *Opts) {
 	for {
 		logger.Info("Starting forwarder")
 
+		var fluentLogLevel zapcore.Level = zap.InfoLevel
+		err := fluentLogLevel.UnmarshalText([]byte(opts.FluentLogLevel))
+		if err != nil {
+			logger.Errorw("Can't set fluent-bit log level", "opts.FluentLogLevel:", opts.FluentLogLevel)
+		}
+
 		cmd := exec.Command(commandName, commandArgs)
 		cmd.Stdout = os.Stdout // Lets us see stdout and stderr of cmd
 		cmd.Stderr = os.Stderr
@@ -371,7 +380,7 @@ func runForwarder(serviceIP string, servicePort int, opts *Opts) {
 		)
 		logger.Debugw("Executing:", "Command", strings.Join(cmd.Args, " "), ", Environment:", strings.Join(cmd.Env, ", "))
 
-		err := cmd.Start()
+		err = cmd.Start()
 		if err != nil {
 			logger.Errorw("Could not start forwarder", "Error", err)
 		}
