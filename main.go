@@ -118,7 +118,7 @@ func init() {
 	cmd.Flags().StringP("kubecfg", "k", homedir+"/.kube/config", "kubecfg path to the cluster to account")
 	cmd.Flags().StringP("namespace", "n", "kube-system", "the namespace of the audit-tailer service")
 	cmd.Flags().StringP("service-name", "s", "kubernetes-audit-tailer", "the service name of the audit-tailer service")
-	cmd.Flags().StringP("secret-name", "s", "audittailer-client", "the name of the secret containing the CA file, client certificate and key")
+	cmd.Flags().StringP("secret-name", "c", "audittailer-client", "the name of the secret containing the CA file, client certificate and key")
 	cmd.Flags().StringP("audit-log-path", "l", "/auditlog", "the path to the directory containing the audit-log files")
 	cmd.Flags().StringP("tls-basedir", "B", "/fluent-bit/etc/ssl", "the path to the directory where the cert and key files should be written")
 	cmd.Flags().StringP("tls-ca-file", "C", "ca.crt", "the filename of the CA file for checking the server (audit-tailer) certificate")
