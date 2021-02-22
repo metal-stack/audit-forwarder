@@ -7,6 +7,8 @@
     env:
     - name: AUDIT_KUBECFG
       value: "/kube.config"
+    - name: AUDIT_LOG_LEVEL
+      value: "debug"
     volumeMounts:
     - mountPath: /auditlog
       name: auditlog

@@ -259,7 +259,7 @@ func run(opts *Opts) error {
 			logger.Errorw("error during secret check", "error", err)
 		}
 
-		logger.Debugw("scheduling next secret check", "at", cronjob.Entry(secretCronId))
+		logger.Debugw("scheduling next secret check", "at", cronjob.Entry(secretCronId).Next)
 	})
 	if err != nil {
 		return errors.Wrap(err, "could not initialize cron schedule")
@@ -270,7 +270,7 @@ func run(opts *Opts) error {
 			logger.Errorw("error during service check", "error", err)
 		}
 
-		logger.Debugw("scheduling next secret check", "at", cronjob.Entry(serviceCronId))
+		logger.Debugw("scheduling next service check", "at", cronjob.Entry(serviceCronId).Next)
 	})
 	if err != nil {
 		return errors.Wrap(err, "could not initialize cron schedule")
@@ -419,7 +419,7 @@ func checkSecret(opts *Opts, client *k8s.Clientset) error {
 	if err != nil { // That means no matching secret found. No need to do anything - we write a new secret when one becomes available.
 		return err
 	}
-	logger.Debugw("Got secret", opts.SecretName, secret)
+	logger.Debugw("Got secret", opts.SecretName, secret.Name)
 
 	if certSecret != nil { // A secret has already been seen
 		if secret.ResourceVersion == certSecret.ResourceVersion { // Secret stayed the same, nothing to do
