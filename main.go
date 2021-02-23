@@ -291,7 +291,7 @@ func run(opts *Opts) error {
 	}
 	cronjob.Start()
 	logger.Infow("cronjob interval", "check-schedule", opts.CheckSchedule)
-	logger.Debugw("Cron entries", cronjob.Entries())
+	logger.Debugw("Cronjob", "entries:", cronjob.Entries())
 
 	<-stop
 	logger.Info("received stop signal, shutting down...")
@@ -399,7 +399,7 @@ func runForwarder(serviceIP string, servicePort int, opts *Opts) {
 			logger.Debugw("Written to confirmation channel, returning")
 			return
 		default:
-			logger.Infow("Forwarder was not killed by this controller, restarting", "Backoff time", opts.BackoffTimer)
+			logger.Infow("Forwarder was not killed by this controller, or was killed so it can re-read its certificates; restarting", "Backoff time", opts.BackoffTimer)
 			time.Sleep(opts.BackoffTimer)
 		}
 	}
