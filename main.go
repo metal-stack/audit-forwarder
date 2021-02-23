@@ -376,7 +376,7 @@ func runForwarder(serviceIP string, servicePort int, opts *Opts) {
 			"TLS_CRT_FILE="+path.Join(opts.TLSBaseDir, opts.TLSCrtFile),
 			"TLS_KEY_FILE="+path.Join(opts.TLSBaseDir, opts.TLSKeyFile),
 			"TLS_VHOST="+opts.TLSVhost,
-			"LOG_LEVEL="+logLevel.String(),
+			"LOG_LEVEL="+fluentLogLevel.String(),
 		)
 		logger.Debugw("Executing:", "Command", strings.Join(cmd.Args, " "), ", Environment:", strings.Join(cmd.Env, ", "))
 
