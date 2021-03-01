@@ -8,7 +8,7 @@
     - name: AUDIT_KUBECFG
       value: "/kube.config"
     - name: AUDIT_LOG_LEVEL
-      value: "debug"
+      value: "info"
     volumeMounts:
     - mountPath: /auditlog
       name: auditlog

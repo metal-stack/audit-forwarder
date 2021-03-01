@@ -36,6 +36,10 @@ spec:
           mountPath: /fluentd/etc
         - name: fluentd-certs
           mountPath: /fluentd/etc/ssl
+        resources:
+          limits:
+            cpu: 100m
+            memory: 512Mi
       volumes:
       - name: fluentd-config
         configMap:
@@ -67,6 +71,13 @@ data:
     </source>
     <match **>
       @type stdout
+      <buffer>
+        total_limit_size          448Mb
+        chunk_limit_size          16Mb
+      </buffer>
+      <format>
+        @type json
+      </format>
     </match>
 ---
 apiVersion: v1
