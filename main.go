@@ -275,12 +275,50 @@ func loadClient(kubeconfigPath string) (*k8s.Clientset, error) {
 	return k8s.NewForConfig(config)
 }
 
+// I think this can be implemented much easier with a Watch on the service
+
+/* example from client-go
+
+func main() {
+    config, err := clientcmd.BuildConfigFromFlags("", "")
+    if err != nil {
+        glog.Errorln(err)
+    }
+    clientset, err := kubernetes.NewForConfig(config)
+    if err != nil {
+        glog.Errorln(err)
+    }
+
+    kubeInformerFactory := kubeinformers.NewSharedInformerFactory(clientset, time.Second*30)
+    svcInformer := kubeInformerFactory.Core().V1().Services().Informer()
+
+    svcInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+        AddFunc: func(obj interface{}) {
+            fmt.Printf("service added: %s \n", obj)
+        },
+        DeleteFunc: func(obj interface{}) {
+            fmt.Printf("service deleted: %s \n", obj)
+        },
+        UpdateFunc: func(oldObj, newObj interface{}) {
+            fmt.Printf("service changed: %s \n", newObj)
+        },
+    },)
+
+    stop := make(chan struct{})
+    defer close(stop)
+    kubeInformerFactory.Start(stop)
+    for {
+        time.Sleep(time.Second)
+    }
+}
+
+*/
 func checkService(opts *Opts, client *k8s.Clientset) error {
 	logger.Debugw("Checking service")
 	// logger.Debugw("Current service", "targetService", targetService)
 
-	kubectx, kubecancel := context.WithTimeout(context.Background(), time.Duration(10*time.Second))
-	defer kubecancel()
+	kubectx, cancel := context.WithTimeout(context.Background(), time.Duration(10*time.Second))
+	defer cancel()
 	service, err := client.CoreV1().Services(opts.NameSpace).Get(kubectx, opts.ServiceName, metav1.GetOptions{})
 	if err != nil { // That means no matching service found
 		if targetService != nil { // This means a service was previously seen, and a forwarder should already be running.
