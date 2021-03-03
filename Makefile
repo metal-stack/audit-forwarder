@@ -22,6 +22,7 @@ bin/$(BINARY): test
 					-X 'github.com/metal-stack/v.Revision=$(GITVERSION)' \
 					-X 'github.com/metal-stack/v.GitSHA1=$(SHA)' \
 					-X 'github.com/metal-stack/v.BuildDate=$(BUILDDATE)'" . && strip bin/$(BINARY)
+	strip bin/$(BINARY)
 
 .PHONY: release
 release: bin/$(BINARY)
