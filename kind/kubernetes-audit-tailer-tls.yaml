@@ -20,14 +20,15 @@ spec:
       # it's better to disable the service links as the default args do not work properly otherwise (metal#64)
       enableServiceLinks: False
       securityContext:
-        runAsUser: 1000
+        runAsUser: 65534
       containers:
-      - image: fluent/fluentd:v1.11
+      - image: fluent/fluentd:v1.12
         imagePullPolicy: IfNotPresent
         name: kubernetes-audit-tailer
-        env: []
-        # - name: FLUENTD_CONF
-        #   value: /fluentd/fluentd.conf
+        env:
+        # This is supposed to limit fluentd memory usage. See https://docs.fluentd.org/deployment/performance-tuning-single-process#reduce-memory-usage.
+        - name: RUBY_GC_HEAP_OLDOBJECT_LIMIT_FACTOR
+          value: "0.9"
         ports:
         - containerPort: 24224
           protocol: TCP
@@ -36,10 +37,13 @@ spec:
           mountPath: /fluentd/etc
         - name: fluentd-certs
           mountPath: /fluentd/etc/ssl
+        - name: fluentbuffer
+          mountPath: /fluentbuffer
         resources:
           limits:
             cpu: 100m
-            memory: 512Mi
+            memory: 200Mi
+        restartPolicy: Always
       volumes:
       - name: fluentd-config
         configMap:
@@ -47,6 +51,8 @@ spec:
       - name: fluentd-certs
         secret:
           secretName: audittailer-server
+      - name: fluentbuffer
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -72,8 +78,12 @@ data:
     <match **>
       @type stdout
       <buffer>
-        total_limit_size          448Mb
-        chunk_limit_size          16Mb
+        @type file
+        path /fluentbuffer/auditlog-*
+        chunk_limit_size          256Mb
+        # This was for memory buffer:
+        # total_limit_size          128Mb
+        # chunk_limit_size          8Mb
       </buffer>
       <format>
         @type json
