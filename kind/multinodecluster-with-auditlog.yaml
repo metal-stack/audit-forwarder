@@ -10,7 +10,7 @@ kubeadmConfigPatches:
   apiServer:
     extraArgs:
       audit-policy-file: /etc/kubernetes/audit/audit-policy.yaml
-      audit-log-path: /auditlog/kube-apiserver-audit.log
+      audit-log-path: /auditlog/audit.log
     extraVolumes:
     - name: auditpolicy
       pathType: File
