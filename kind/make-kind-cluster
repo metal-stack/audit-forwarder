@@ -20,7 +20,7 @@ cp -R audit/ kind-etc-kubernetes/audit/
 kind create cluster --config multinodecluster-with-auditlog.yaml
 kind export kubeconfig --kubeconfig kube.config
 
-# Apply the tailer certificates secret
+# Apply the tailer certificates secrets
 kubectl apply -f certs/tailer-certs.yaml
 
 echo "Cluster created, before the next step execute:"
