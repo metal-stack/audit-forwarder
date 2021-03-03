@@ -5,7 +5,7 @@ WORKDIR /go/src/github.com/mreiger/audit-forwarder/
 COPY .git Makefile go.* *.go /go/src/github.com/mreiger/audit-forwarder/
 RUN make bin/audit-forwarder
 
-FROM fluent/fluent-bit:1.6-debug
+FROM fluent/fluent-bit:1.7-debug
 
 COPY --from=builder /go/src/github.com/mreiger/audit-forwarder/bin/audit-forwarder /fluent-bit/bin/
 COPY *.conf /fluent-bit/etc/

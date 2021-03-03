@@ -10,7 +10,7 @@ kubeadmConfigPatches:
   apiServer:
     extraArgs:
       audit-policy-file: /etc/kubernetes/audit/audit-policy.yaml
-      audit-log-path: /audit/kube-apiserver-audit.log
+      audit-log-path: /auditlog/kube-apiserver-audit.log
     extraVolumes:
     - name: auditpolicy
       pathType: File
@@ -23,7 +23,7 @@ kubeadmConfigPatches:
       pathType: Directory
       readOnly: False
       hostPath: /var/log/audit
-      mountPath: /audit
+      mountPath: /auditlog
 nodes:
 - role: control-plane
   extraMounts:

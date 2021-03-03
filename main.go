@@ -1,9 +1,11 @@
 package main
 
 import (
-	"time"
-
+	"fmt"
+	"io/ioutil"
 	"log"
+	"path"
+	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -45,9 +47,12 @@ var (
 	logLevel            zapcore.Level
 	stop                <-chan struct{}
 	targetService       *apiv1.Service
+	certSecret          *apiv1.Secret
 	forwarderKilledChan chan struct{}
 	killForwarderChan   chan struct{}
 	forwarderProcess    *os.Process
+	secretCronID        cron.EntryID
+	serviceCronID       cron.EntryID
 )
 
 // CronLogger is used for logging within the cron function.
@@ -68,17 +73,20 @@ func (c *CronLogger) Error(err error, msg string, keysAndValues ...interface{}) 
 // this is because MarkFlagRequired from cobra does not work well with viper, see:
 // https://github.com/spf13/viper/issues/397
 type Opts struct {
-	KubeCfg       string
-	NameSpace     string
-	ServiceName   string
-	AuditLogPath  string
-	TLSCaFile     string
-	TLSCrtFile    string
-	TLSKeyFile    string
-	TLSVhost      string
-	CheckSchedule string
-	BackoffTimer  time.Duration
-	LogLevel      string
+	KubeCfg        string
+	NameSpace      string
+	ServiceName    string
+	SecretName     string
+	AuditLogPath   string
+	TLSBaseDir     string
+	TLSCaFile      string
+	TLSCrtFile     string
+	TLSKeyFile     string
+	TLSVhost       string
+	CheckSchedule  string
+	BackoffTimer   time.Duration
+	LogLevel       string
+	FluentLogLevel string
 }
 
 var cmd = &cobra.Command{
@@ -111,14 +119,17 @@ func init() {
 	cmd.Flags().StringP("kubecfg", "k", homedir+"/.kube/config", "kubecfg path to the cluster to account")
 	cmd.Flags().StringP("namespace", "n", "kube-system", "the namespace of the audit-tailer service")
 	cmd.Flags().StringP("service-name", "s", "kubernetes-audit-tailer", "the service name of the audit-tailer service")
-	cmd.Flags().StringP("audit-log-path", "l", "/audit", "the path to the directory containing the audit-log files")
-	cmd.Flags().StringP("tls-ca-file", "C", "/fluent-bit/etc/ssl/ca.crt", "the path to the CA file for checking the server (audit-tailer) certificate")
-	cmd.Flags().StringP("tls-crt-file", "R", "/fluent-bit/etc/ssl/forwarder.crt", "the path to the client certificate used to authenticate to the audit-tailer")
-	cmd.Flags().StringP("tls-key-file", "K", "/fluent-bit/etc/ssl/forwarder.key", "the path to the private key file belonging to the client certificate")
+	cmd.Flags().StringP("secret-name", "e", "audittailer-client", "the name of the secret containing the CA file, client certificate and key")
+	cmd.Flags().StringP("audit-log-path", "l", "/auditlog", "the path to the directory containing the audit-log files")
+	cmd.Flags().StringP("tls-basedir", "B", "/fluent-bit/etc/ssl", "the path to the directory where the cert and key files should be written")
+	cmd.Flags().StringP("tls-ca-file", "C", "ca.crt", "the filename of the CA file for checking the server (audit-tailer) certificate")
+	cmd.Flags().StringP("tls-crt-file", "R", "audittailer-client.crt", "the filename of the client certificate used to authenticate to the audit-tailer")
+	cmd.Flags().StringP("tls-key-file", "K", "audittailer-client.key", "the filename of the private key file belonging to the client certificate")
 	cmd.Flags().StringP("tls-vhost", "H", "kubernetes-audit-tailer", "the name of the audit-tailer, as presented in its server certificate. This is needed so that the certificate is accepted by fluent-bit")
 	cmd.Flags().StringP("check-schedule", "S", "*/1 * * * *", "cron schedule when to check for service changes")
-	cmd.Flags().DurationP("backoff-timer", "B", time.Duration(10*time.Second), "Backoff time for restarting the forwarder process when it has been killed by external influences")
+	cmd.Flags().DurationP("backoff-timer", "b", time.Duration(10*time.Second), "Backoff time for restarting the forwarder process when it has been killed by external influences")
 	cmd.Flags().StringP("log-level", "L", "info", "sets the application log level")
+	cmd.Flags().StringP("fluent-log-level", "O", "info", "sets the log level for the fluent-bit command")
 
 	err = viper.BindPFlags(cmd.Flags())
 	if err != nil {
@@ -128,17 +139,20 @@ func init() {
 
 func initOpts() (*Opts, error) {
 	opts := &Opts{
-		KubeCfg:       viper.GetString("kubecfg"),
-		NameSpace:     viper.GetString("namespace"),
-		ServiceName:   viper.GetString("service-name"),
-		AuditLogPath:  viper.GetString("audit-log-path"),
-		TLSCaFile:     viper.GetString("tls-ca-file"),
-		TLSCrtFile:    viper.GetString("tls-crt-file"),
-		TLSKeyFile:    viper.GetString("tls-key-file"),
-		TLSVhost:      viper.GetString("tls-vhost"),
-		CheckSchedule: viper.GetString("check-schedule"),
-		BackoffTimer:  viper.GetDuration("backoff-timer"),
-		LogLevel:      viper.GetString("log-level"),
+		KubeCfg:        viper.GetString("kubecfg"),
+		NameSpace:      viper.GetString("namespace"),
+		ServiceName:    viper.GetString("service-name"),
+		SecretName:     viper.GetString("secret-name"),
+		AuditLogPath:   viper.GetString("audit-log-path"),
+		TLSBaseDir:     viper.GetString("tls-basedir"),
+		TLSCaFile:      viper.GetString("tls-ca-file"),
+		TLSCrtFile:     viper.GetString("tls-crt-file"),
+		TLSKeyFile:     viper.GetString("tls-key-file"),
+		TLSVhost:       viper.GetString("tls-vhost"),
+		CheckSchedule:  viper.GetString("check-schedule"),
+		BackoffTimer:   viper.GetDuration("backoff-timer"),
+		LogLevel:       viper.GetString("log-level"),
+		FluentLogLevel: viper.GetString("fluent-log-level"),
 	}
 
 	validate := validator.New()
@@ -223,6 +237,13 @@ func run(opts *Opts) error {
 	forwarderKilledChan = make(chan struct{})
 	killForwarderChan = make(chan struct{}, 1)
 
+	// set up certificates directory
+	err := os.MkdirAll(opts.TLSBaseDir, 0750)
+	if err != nil {
+		logger.Errorw("Unable to create certificate directory", opts.TLSBaseDir, err)
+		return err
+	}
+
 	// Prepare K8s
 	client, err := loadClient(opts.KubeCfg)
 	if err != nil {
@@ -230,34 +251,47 @@ func run(opts *Opts) error {
 		return err
 	}
 
-	// Set up (and run) cron job
+	// Set up (and run) service checker cron job
 	cronjob := cron.New(cron.WithChain(
 		cron.SkipIfStillRunning(&CronLogger{l: logger.Named("cron")}),
 	))
 
-	id, err := cronjob.AddFunc(opts.CheckSchedule, func() {
+	secretCronID, err = cronjob.AddFunc(opts.CheckSchedule, func() {
+		err := checkSecret(opts, client)
+		if err != nil {
+			logger.Errorw("error during secret check", "error", err)
+		}
+
+		logger.Debugw("scheduling next secret check", "at", cronjob.Entry(secretCronID).Next)
+	})
+	if err != nil {
+		return errors.Wrap(err, "could not initialize cron schedule")
+	}
+	serviceCronID, err = cronjob.AddFunc(opts.CheckSchedule, func() {
 		err := checkService(opts, client)
 		if err != nil {
 			logger.Errorw("error during service check", "error", err)
 		}
 
-		for _, e := range cronjob.Entries() {
-			logger.Debugw("scheduling next service check", "at", e.Next.String())
-		}
+		logger.Debugw("scheduling next service check", "at", cronjob.Entry(serviceCronID).Next)
 	})
 	if err != nil {
 		return errors.Wrap(err, "could not initialize cron schedule")
 	}
 
-	logger.Infow("start service check", "version", v.V.String())
+	logger.Infow("start initial checks", "version", v.V.String())
 
+	err = checkSecret(opts, client)
+	if err != nil {
+		logger.Errorw("error during initial secret check", "error", err)
+	}
 	err = checkService(opts, client)
 	if err != nil {
 		logger.Errorw("error during initial service check", "error", err)
 	}
 	cronjob.Start()
-	logger.Infow("service-check interval", "check-schedule", opts.CheckSchedule)
-	logger.Debugw("scheduling next service check", "at", cronjob.Entry(id).Next.String())
+	logger.Infow("cronjob interval", "check-schedule", opts.CheckSchedule)
+	logger.Debugw("Cronjob", "entries:", cronjob.Entries())
 
 	<-stop
 	logger.Info("received stop signal, shutting down...")
@@ -308,6 +342,12 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 		killForwarder()
 	}
 
+	// Check whether the certificates have already been written!
+	if certSecret == nil {
+		logger.Debugw("No certificates in place, waiting.")
+		return nil
+	}
+
 	logger.Infow("Target identified", "IP", serviceIP, "Port", servicePort)
 	go runForwarder(serviceIP, int(servicePort), opts)
 	targetService = service
@@ -318,6 +358,12 @@ func runForwarder(serviceIP string, servicePort int, opts *Opts) {
 	for {
 		logger.Info("Starting forwarder")
 
+		var fluentLogLevel zapcore.Level = zap.InfoLevel
+		err := fluentLogLevel.UnmarshalText([]byte(opts.FluentLogLevel))
+		if err != nil {
+			logger.Errorw("Can't set fluent-bit log level", "opts.FluentLogLevel:", opts.FluentLogLevel)
+		}
+
 		cmd := exec.Command(commandName, commandArgs)
 		cmd.Stdout = os.Stdout // Lets us see stdout and stderr of cmd
 		cmd.Stderr = os.Stderr
@@ -326,15 +372,15 @@ func runForwarder(serviceIP string, servicePort int, opts *Opts) {
 			"AUDIT_TAILER_HOST="+serviceIP,
 			"AUDIT_TAILER_PORT="+strconv.Itoa(servicePort),
 			"AUDIT_LOG_PATH="+opts.AuditLogPath,
-			"TLS_CA_FILE="+opts.TLSCaFile,
-			"TLS_CRT_FILE="+opts.TLSCrtFile,
-			"TLS_KEY_FILE="+opts.TLSKeyFile,
+			"TLS_CA_FILE="+path.Join(opts.TLSBaseDir, opts.TLSCaFile),
+			"TLS_CRT_FILE="+path.Join(opts.TLSBaseDir, opts.TLSCrtFile),
+			"TLS_KEY_FILE="+path.Join(opts.TLSBaseDir, opts.TLSKeyFile),
 			"TLS_VHOST="+opts.TLSVhost,
-			"LOG_LEVEL="+logLevel.String(),
+			"LOG_LEVEL="+fluentLogLevel.String(),
 		)
 		logger.Debugw("Executing:", "Command", strings.Join(cmd.Args, " "), ", Environment:", strings.Join(cmd.Env, ", "))
 
-		err := cmd.Start()
+		err = cmd.Start()
 		if err != nil {
 			logger.Errorw("Could not start forwarder", "Error", err)
 		}
@@ -353,7 +399,7 @@ func runForwarder(serviceIP string, servicePort int, opts *Opts) {
 			logger.Debugw("Written to confirmation channel, returning")
 			return
 		default:
-			logger.Infow("Forwarder was not killed by this controller, restarting", "Backoff time", opts.BackoffTimer)
+			logger.Infow("Forwarder was not killed by this controller, or was killed so it can re-read its certificates; restarting", "Backoff time", opts.BackoffTimer)
 			time.Sleep(opts.BackoffTimer)
 		}
 	}
@@ -370,4 +416,51 @@ func killForwarder() {
 	// Wait for the old forwarder to exit
 	<-forwarderKilledChan
 	logger.Infow("Forwarder successfully killed")
+}
+
+func checkSecret(opts *Opts, client *k8s.Clientset) error {
+	logger.Debugw("Checking secret")
+	keys := []string{opts.TLSCaFile, opts.TLSCrtFile, opts.TLSKeyFile}
+
+	kubectx, kubecancel := context.WithTimeout(context.Background(), time.Duration(10*time.Second))
+	defer kubecancel()
+	secret, err := client.CoreV1().Secrets(opts.NameSpace).Get(kubectx, opts.SecretName, metav1.GetOptions{})
+	if err != nil { // That means no matching secret found. No need to do anything - we write a new secret when one becomes available.
+		return err
+	}
+	logger.Debugw("Got secret", opts.SecretName, secret.Name)
+
+	if certSecret != nil { // A secret has already been seen
+		if secret.ResourceVersion == certSecret.ResourceVersion { // Secret stayed the same, nothing to do
+			logger.Debugw("Secret stayed the same", "ResourceVersion", secret.ResourceVersion)
+			return nil
+		}
+	}
+
+	// Now we attempt to write the certificates to file
+	for _, k := range keys {
+		v, ok := secret.Data[k]
+		if !ok {
+			return fmt.Errorf("could not find key in secret key:%s", k)
+		}
+		f := path.Join(opts.TLSBaseDir, k)
+		logger.Debugw("Writing certificate to file", k, f)
+		err := ioutil.WriteFile(f, v, 0640)
+		if err != nil {
+			return fmt.Errorf("could not write secret to certificate base folder:%v", err)
+		}
+	}
+
+	// Certificates successfully written; if there is a forwarder already running we must restart it now.
+	if forwarderProcess != nil {
+		logger.Debugw("Forwarder running, killing it so it can restart.", "Process:", forwarderProcess)
+		err := forwarderProcess.Kill()
+		if err != nil {
+			logger.Errorw("Could not kill process", "Error", err)
+		}
+	}
+
+	certSecret = secret
+
+	return nil
 }

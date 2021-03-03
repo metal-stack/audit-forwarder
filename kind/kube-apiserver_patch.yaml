@@ -1,19 +1,21 @@
 - op: add
   path: /spec/containers/1
   value:
-    image: mreiger/audit-forwarder:pr-TLS
+    image: mreiger/audit-forwarder:pr-read-certs
     imagePullPolicy: Always
     name: audit-forwarder
     env:
     - name: AUDIT_KUBECFG
       value: "/kube.config"
+    - name: AUDIT_LOG_LEVEL
+      value: "info"
     volumeMounts:
-    - mountPath: /audit
+    - mountPath: /auditlog
       name: auditlog
     - mountPath: /kube.config
       name: kubeconfig
-    - mountPath: /fluent-bit/etc/ssl
-      name: forwarder-certs
+    # - mountPath: /fluent-bit/etc/ssl
+    #   name: forwarder-certs
 - op: add
   path: /spec/volumes/0
   value:
@@ -21,10 +23,10 @@
       path: /etc/kubernetes/audit/kube.config
       type: File
     name: kubeconfig
-- op: add
-  path: /spec/volumes/0
-  value:
-    hostPath:
-      path: /etc/kubernetes/audit/ssl
-      type: Directory
-    name: forwarder-certs
+# - op: add
+#   path: /spec/volumes/0
+#   value:
+#     hostPath:
+#       path: /etc/kubernetes/audit/ssl
+#       type: Directory
+#     name: forwarder-certs
