@@ -43,7 +43,7 @@ spec:
           limits:
             cpu: 100m
             memory: 200Mi
-        restartPolicy: Always
+      restartPolicy: Always
       volumes:
       - name: fluentd-config
         configMap:
