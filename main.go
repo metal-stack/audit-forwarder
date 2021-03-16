@@ -483,9 +483,9 @@ func checkSecret(opts *Opts, client *k8s.Clientset) error {
 		}
 		f := path.Join(opts.TLSBaseDir, k)
 		logger.Debugw("Writing certificate to file", k, f)
-		err := ioutil.WriteFile(f, v, 0640)
+		err := ioutil.WriteFile(f, v, 0600)
 		if err != nil {
-			return fmt.Errorf("could not write secret to certificate base folder:%v", err)
+			return fmt.Errorf("could not write secret to certificate base folder:%w", err)
 		}
 	}
 
