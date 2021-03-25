@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 
+	konnectivityproxy "github.com/metal-stack/audit-forwarder/pkg/konnectivity-proxy"
 	"github.com/metal-stack/v"
 
 	"github.com/mitchellh/go-homedir"
@@ -73,20 +74,21 @@ func (c *CronLogger) Error(err error, msg string, keysAndValues ...interface{}) 
 // this is because MarkFlagRequired from cobra does not work well with viper, see:
 // https://github.com/spf13/viper/issues/397
 type Opts struct {
-	KubeCfg        string
-	NameSpace      string
-	ServiceName    string
-	SecretName     string
-	AuditLogPath   string
-	TLSBaseDir     string
-	TLSCaFile      string
-	TLSCrtFile     string
-	TLSKeyFile     string
-	TLSVhost       string
-	CheckSchedule  string
-	BackoffTimer   time.Duration
-	LogLevel       string
-	FluentLogLevel string
+	KubeCfg               string
+	NameSpace             string
+	ServiceName           string
+	SecretName            string
+	AuditLogPath          string
+	TLSBaseDir            string
+	TLSCaFile             string
+	TLSCrtFile            string
+	TLSKeyFile            string
+	TLSVhost              string
+	CheckSchedule         string
+	BackoffTimer          time.Duration
+	LogLevel              string
+	FluentLogLevel        string
+	KonnectivityUDSSocket string
 }
 
 var cmd = &cobra.Command{
@@ -130,6 +132,7 @@ func init() {
 	cmd.Flags().DurationP("backoff-timer", "b", time.Duration(10*time.Second), "Backoff time for restarting the forwarder process when it has been killed by external influences")
 	cmd.Flags().StringP("log-level", "L", "info", "sets the application log level")
 	cmd.Flags().StringP("fluent-log-level", "O", "info", "sets the log level for the fluent-bit command")
+	cmd.Flags().StringP("konnectivity-uds-socket", "u", "", "If set, try and connect through this konnectivity UDS socket. Expected method is http-connect.")
 
 	err = viper.BindPFlags(cmd.Flags())
 	if err != nil {
@@ -139,20 +142,21 @@ func init() {
 
 func initOpts() (*Opts, error) {
 	opts := &Opts{
-		KubeCfg:        viper.GetString("kubecfg"),
-		NameSpace:      viper.GetString("namespace"),
-		ServiceName:    viper.GetString("service-name"),
-		SecretName:     viper.GetString("secret-name"),
-		AuditLogPath:   viper.GetString("audit-log-path"),
-		TLSBaseDir:     viper.GetString("tls-basedir"),
-		TLSCaFile:      viper.GetString("tls-ca-file"),
-		TLSCrtFile:     viper.GetString("tls-crt-file"),
-		TLSKeyFile:     viper.GetString("tls-key-file"),
-		TLSVhost:       viper.GetString("tls-vhost"),
-		CheckSchedule:  viper.GetString("check-schedule"),
-		BackoffTimer:   viper.GetDuration("backoff-timer"),
-		LogLevel:       viper.GetString("log-level"),
-		FluentLogLevel: viper.GetString("fluent-log-level"),
+		KubeCfg:               viper.GetString("kubecfg"),
+		NameSpace:             viper.GetString("namespace"),
+		ServiceName:           viper.GetString("service-name"),
+		SecretName:            viper.GetString("secret-name"),
+		AuditLogPath:          viper.GetString("audit-log-path"),
+		TLSBaseDir:            viper.GetString("tls-basedir"),
+		TLSCaFile:             viper.GetString("tls-ca-file"),
+		TLSCrtFile:            viper.GetString("tls-crt-file"),
+		TLSKeyFile:            viper.GetString("tls-key-file"),
+		TLSVhost:              viper.GetString("tls-vhost"),
+		CheckSchedule:         viper.GetString("check-schedule"),
+		BackoffTimer:          viper.GetDuration("backoff-timer"),
+		LogLevel:              viper.GetString("log-level"),
+		FluentLogLevel:        viper.GetString("fluent-log-level"),
+		KonnectivityUDSSocket: viper.GetString("konnectivity-uds-socket"),
 	}
 
 	validate := validator.New()
@@ -369,7 +373,7 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 		logger.Errorw("Service must have exactly one port", "Ports", service.Spec.Ports)
 		return errors.Errorf("Service must have exactly one port")
 	}
-	servicePort := service.Spec.Ports[0].Port
+	servicePort := strconv.Itoa(int(service.Spec.Ports[0].Port))
 
 	if targetService != nil { // This means a service was previously seen, and a forwarder should already be running.
 		if targetService.Spec.ClusterIP == service.Spec.ClusterIP && targetService.Spec.Ports[0].Port == service.Spec.Ports[0].Port {
@@ -387,14 +391,21 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 	}
 
 	logger.Infow("Target identified", "IP", serviceIP, "Port", servicePort)
-	go runForwarder(serviceIP, int(servicePort), opts)
+	go runForwarder(serviceIP, servicePort, opts)
 	targetService = service
 	return nil
 }
 
-func runForwarder(serviceIP string, servicePort int, opts *Opts) {
+func runForwarder(serviceIP, servicePort string, opts *Opts) {
 	for {
 		logger.Info("Starting forwarder")
+		fluentTargetIP := serviceIP
+
+		if opts.KonnectivityUDSSocket != "" {
+			// TODO set up the tunnel
+			go konnectivityproxy.MakeProxy(opts.KonnectivityUDSSocket, serviceIP, servicePort)
+			fluentTargetIP = "127.0.0.1"
+		}
 
 		var fluentLogLevel zapcore.Level = zap.InfoLevel
 		err := fluentLogLevel.UnmarshalText([]byte(opts.FluentLogLevel))
@@ -407,8 +418,8 @@ func runForwarder(serviceIP string, servicePort int, opts *Opts) {
 		cmd.Stderr = os.Stderr
 
 		cmd.Env = append(os.Environ(),
-			"AUDIT_TAILER_HOST="+serviceIP,
-			"AUDIT_TAILER_PORT="+strconv.Itoa(servicePort),
+			"AUDIT_TAILER_HOST="+fluentTargetIP,
+			"AUDIT_TAILER_PORT="+servicePort,
 			"AUDIT_LOG_PATH="+opts.AuditLogPath,
 			"TLS_CA_FILE="+path.Join(opts.TLSBaseDir, opts.TLSCaFile),
 			"TLS_CRT_FILE="+path.Join(opts.TLSBaseDir, opts.TLSCrtFile),

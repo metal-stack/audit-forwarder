@@ -1,4 +1,4 @@
-module github.com/mreiger/audit-forwarder
+module github.com/metal-stack/audit-forwarder
 
 go 1.15
 
@@ -18,5 +18,6 @@ require (
 	k8s.io/api v0.20.4
 	k8s.io/apimachinery v0.20.4
 	k8s.io/client-go v0.20.4
+	k8s.io/klog/v2 v2.4.0
 	sigs.k8s.io/controller-runtime v0.6.5
 )
