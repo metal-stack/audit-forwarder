@@ -22,7 +22,7 @@ import (
 	"strconv"
 	"strings"
 
-	konnectivityproxy "github.com/metal-stack/audit-forwarder/pkg/konnectivity-proxy"
+	"github.com/metal-stack/audit-forwarder/pkg/konnectivityproxy"
 	"github.com/metal-stack/v"
 
 	"github.com/mitchellh/go-homedir"
