@@ -16,19 +16,21 @@ import (
 	"k8s.io/klog/v2"
 )
 
-func MakeProxy(uds, ip, port string) error {
+func MakeProxy(uds, ip, port string) {
 	addr := net.JoinHostPort(ip, port)
 
 	// Setting up the listener.
 	endpoint, _ := net.ResolveTCPAddr("tcp", net.JoinHostPort("0.0.0.0", port))
 	listener, err := net.ListenTCP("tcp", endpoint)
 	if err != nil {
-		return fmt.Errorf("Could not open port for listening: %s", port)
+		klog.Errorf("Could not open port for listening: %s", port)
+		return
 	}
 	for {
 		srvConn, err := listener.AcceptTCP()
 		if err != nil {
-			return fmt.Errorf("Error accepting connection on listener: %s", listener.Addr().String())
+			klog.Errorf("Error accepting connection on listener: %s", listener.Addr().String())
+			return
 		}
 		go handleConnection(srvConn, uds, addr)
 	}
@@ -47,6 +49,8 @@ func handleConnection(srvConn *net.TCPConn, uds, addr string) {
 		klog.Errorf("reading HTTP response from CONNECT to %s via uds proxy %s failed: %v", addr, uds, err)
 		return
 	}
+	defer res.Body.Close()
+
 	if res.StatusCode != 200 {
 		klog.Errorf("proxy error from %s while dialing %s: %v", uds, addr, res.Status)
 		return
@@ -77,7 +81,7 @@ func handleConnection(srvConn *net.TCPConn, uds, addr string) {
 		// the client closed first and any more packets from the server aren't
 		// useful, so we can optionally SetLinger(0) here to recycle the port
 		// faster.
-		srvConn.SetLinger(0)
+		_ = srvConn.SetLinger(0)
 		srvConn.Close()
 		waitFor = serverClosed
 	case <-serverClosed:
@@ -118,12 +122,14 @@ func tunnelHTTPConnect(proxyConn net.Conn, proxyAddress, addr string) (net.Conn,
 	res, err := http.ReadResponse(br, nil)
 	if err != nil {
 		proxyConn.Close()
-		return nil, fmt.Errorf("reading HTTP response from CONNECT to %s via proxy %s failed: %v",
+		return nil, fmt.Errorf("reading HTTP response from CONNECT to %s via proxy %s failed: %w",
 			addr, proxyAddress, err)
 	}
+	defer res.Body.Close()
+
 	if res.StatusCode != 200 {
 		proxyConn.Close()
-		return nil, fmt.Errorf("proxy error from %s while dialing %s, code %d: %v",
+		return nil, fmt.Errorf("proxy error from %s while dialing %s, code %d: %s",
 			proxyAddress, addr, res.StatusCode, res.Status)
 	}
 
