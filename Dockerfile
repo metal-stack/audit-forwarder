@@ -2,7 +2,7 @@ FROM golang:1.15 AS builder
 
 WORKDIR /work
 
-COPY .git Makefile go.* *.go /work/
+COPY .git Makefile go.* *.go pkg /work/
 RUN make bin/audit-forwarder
 
 FROM fluent/fluent-bit:1.7.0-debug
