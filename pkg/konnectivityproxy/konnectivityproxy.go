@@ -19,7 +19,8 @@ var (
 	logger *zap.SugaredLogger
 )
 
-func MakeProxy(uds, ip, port string, logger *zap.SugaredLogger) {
+func MakeProxy(uds, ip, port string, l *zap.SugaredLogger) {
+	logger = l
 	addr := net.JoinHostPort(ip, port)
 	logger.Infow("MakeProxy called", "unix domain socket", uds, "destination address", ip, "Port", port)
 
