@@ -6,7 +6,7 @@ COPY .git Makefile go.* *.go /work/
 COPY pkg/ /work/pkg/
 RUN make bin/audit-forwarder
 
-FROM fluent/fluent-bit:1.7.0-debug
+FROM fluent/fluent-bit:1.7.3-debug
 
 COPY --from=builder /work/bin/audit-forwarder /fluent-bit/bin/
 COPY *.conf /fluent-bit/etc/
