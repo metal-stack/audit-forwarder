@@ -9,50 +9,56 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 
-	"k8s.io/klog/v2"
+	"go.uber.org/zap"
 )
 
-func MakeProxy(uds, ip, port string) {
+var (
+	logger *zap.SugaredLogger
+)
+
+func MakeProxy(uds, ip, port string, logger *zap.SugaredLogger) {
 	addr := net.JoinHostPort(ip, port)
+	logger.Infow("MakeProxy called", "unix domain socket", uds, "destination address", ip, "Port", port)
 
 	// Setting up the listener.
 	endpoint, _ := net.ResolveTCPAddr("tcp", net.JoinHostPort("0.0.0.0", port))
 	listener, err := net.ListenTCP("tcp", endpoint)
 	if err != nil {
-		klog.Errorf("Could not open port for listening: %s", port)
+		logger.Errorw("Could not open port for listening", "Port:", port)
 		return
 	}
 	for {
 		srvConn, err := listener.AcceptTCP()
 		if err != nil {
-			klog.Errorf("Error accepting connection on listener: %s", listener.Addr().String())
+			logger.Errorw("Error accepting connection on listener", "listener:", listener)
 			return
 		}
+		logger.Infow("New connection", "Connection", srvConn)
 		go handleConnection(srvConn, uds, addr)
 	}
 }
 
 func handleConnection(srvConn *net.TCPConn, uds, addr string) {
+	logger.Infow("handleConnection called", "srvConn", srvConn, "unix domain socket", uds, "target address", addr)
 	proxyConn, err := net.Dial("unix", uds)
 	if err != nil {
-		klog.Errorf("dialing proxy %q failed: %v", uds, err)
+		logger.Errorw("dialing proxy failed", "unix domain socket", uds, "error", err)
 		return
 	}
 	fmt.Fprintf(proxyConn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\n\r\n", addr, "127.0.0.1", "auditforwarder")
 	br := bufio.NewReader(proxyConn)
 	res, err := http.ReadResponse(br, nil)
 	if err != nil {
-		klog.Errorf("reading HTTP response from CONNECT to %s via uds proxy %s failed: %v", addr, uds, err)
+		logger.Errorf("reading HTTP response from CONNECT to %s via uds proxy %s failed: %v", addr, uds, err)
 		return
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode != 200 {
-		klog.Errorf("proxy error from %s while dialing %s: %v", uds, addr, res.Status)
+		logger.Errorf("proxy error from %s while dialing %s: %v", uds, addr, res.Status)
 		return
 	}
 	// It's safe to discard the bufio.Reader here and return the
@@ -60,7 +66,7 @@ func handleConnection(srvConn *net.TCPConn, uds, addr string) {
 	// TLS, and in TLS the client speaks first, so we know there's
 	// no unbuffered data. But we can double-check.
 	if br.Buffered() > 0 {
-		klog.Errorf("unexpected %d bytes of buffered data from CONNECT uds proxy %q", br.Buffered(), uds)
+		logger.Errorf("unexpected %d bytes of buffered data from CONNECT uds proxy %q", br.Buffered(), uds)
 		return
 	}
 	// Now we're supposed to have both connections open.
@@ -106,10 +112,10 @@ func broker(dst, src net.Conn, srcClosed chan struct{}) {
 	_, err := io.Copy(dst, src)
 
 	if err != nil {
-		log.Printf("Copy error: %s", err)
+		logger.Errorf("Copy error: %s", err)
 	}
 	if err := src.Close(); err != nil {
-		log.Printf("Close error: %s", err)
+		logger.Errorf("Close error: %s", err)
 	}
 	srcClosed <- struct{}{}
 }
