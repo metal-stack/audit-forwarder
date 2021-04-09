@@ -37,13 +37,13 @@ func MakeProxy(uds, ip, port string, l *zap.SugaredLogger) {
 			logger.Errorw("Error accepting connection on listener", "listener:", listener)
 			return
 		}
-		logger.Infow("New connection", "Connection", srvConn)
+		logger.Infow("New connection", "listener", listener, "local address", srvConn.LocalAddr(), "remote address", srvConn.RemoteAddr())
 		go handleConnection(srvConn, uds, addr)
 	}
 }
 
 func handleConnection(srvConn *net.TCPConn, uds, addr string) {
-	logger.Infow("handleConnection called", "srvConn", srvConn, "unix domain socket", uds, "target address", addr)
+	logger.Infow("handleConnection called", "local address", srvConn.LocalAddr(), "remote address", srvConn.RemoteAddr(), "unix domain socket", uds, "target address", addr)
 	proxyConn, err := net.Dial("unix", uds)
 	if err != nil {
 		logger.Errorw("dialing proxy failed", "unix domain socket", uds, "error", err)
@@ -119,35 +119,4 @@ func broker(dst, src net.Conn, srcClosed chan struct{}) {
 		logger.Errorf("Close error: %s", err)
 	}
 	srcClosed <- struct{}{}
-}
-
-// Not needed, keeping for reference now:
-
-func tunnelHTTPConnect(proxyConn net.Conn, proxyAddress, addr string) (net.Conn, error) {
-	fmt.Fprintf(proxyConn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", addr, "127.0.0.1")
-	br := bufio.NewReader(proxyConn)
-	res, err := http.ReadResponse(br, nil)
-	if err != nil {
-		proxyConn.Close()
-		return nil, fmt.Errorf("reading HTTP response from CONNECT to %s via proxy %s failed: %w",
-			addr, proxyAddress, err)
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode != 200 {
-		proxyConn.Close()
-		return nil, fmt.Errorf("proxy error from %s while dialing %s, code %d: %s",
-			proxyAddress, addr, res.StatusCode, res.Status)
-	}
-
-	// It's safe to discard the bufio.Reader here and return the
-	// original TCP conn directly because we only use this for
-	// TLS, and in TLS the client speaks first, so we know there's
-	// no unbuffered data. But we can double-check.
-	if br.Buffered() > 0 {
-		proxyConn.Close()
-		return nil, fmt.Errorf("unexpected %d bytes of buffered data from CONNECT proxy %q",
-			br.Buffered(), proxyAddress)
-	}
-	return proxyConn, nil
 }
