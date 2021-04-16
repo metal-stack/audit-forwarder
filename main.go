@@ -402,7 +402,6 @@ func runForwarder(serviceIP, servicePort string, opts *Opts) {
 		fluentTargetIP := serviceIP
 
 		if opts.KonnectivityUDSSocket != "" {
-			// TODO set up the tunnel
 			go konnectivityproxy.MakeProxy(opts.KonnectivityUDSSocket, serviceIP, servicePort, logger)
 			fluentTargetIP = "127.0.0.1"
 		}
