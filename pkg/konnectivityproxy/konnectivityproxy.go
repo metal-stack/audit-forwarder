@@ -32,13 +32,14 @@ func MakeProxy(ctx context.Context, uds, ip, port string, l *zap.SugaredLogger) 
 		logger.Errorw("Could not open port for listening", "Port:", port)
 		return
 	}
+	defer listener.Close()
+	go listenForConnections(*listener, uds, addr)
+	<-ctx.Done()
+	logger.Info("Context canceled, exiting", "error", ctx.Err())
+}
+
+func listenForConnections(listener net.TCPListener, uds, addr string) {
 	for {
-		select {
-		case <-ctx.Done():
-			logger.Info("Context canceled, exiting")
-			return
-		default:
-		}
 		srvConn, err := listener.AcceptTCP()
 		if err != nil {
 			logger.Errorw("Error accepting connection on listener", "listener:", listener)
