@@ -35,7 +35,7 @@ func MakeProxy(ctx context.Context, uds, ip, port string, l *zap.SugaredLogger) 
 	defer listener.Close()
 	go listenForConnections(*listener, uds, addr)
 	<-ctx.Done()
-	logger.Info("Context canceled, exiting", "error", ctx.Err())
+	logger.Infow("Context canceled, exiting", "error", ctx.Err())
 }
 
 func listenForConnections(listener net.TCPListener, uds, addr string) {
