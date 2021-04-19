@@ -35,6 +35,7 @@ func MakeProxy(ctx context.Context, uds, ip, port string, l *zap.SugaredLogger) 
 	for {
 		select {
 		case <-ctx.Done():
+			logger.Info("Context canceled, exiting")
 			return
 		default:
 		}
