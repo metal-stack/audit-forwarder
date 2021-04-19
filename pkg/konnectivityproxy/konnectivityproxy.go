@@ -7,6 +7,7 @@ package konnectivityproxy
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -19,7 +20,7 @@ var (
 	logger *zap.SugaredLogger
 )
 
-func MakeProxy(uds, ip, port string, l *zap.SugaredLogger) {
+func MakeProxy(ctx context.Context, uds, ip, port string, l *zap.SugaredLogger) {
 	logger = l
 	addr := net.JoinHostPort(ip, port)
 	logger.Infow("MakeProxy called", "unix domain socket", uds, "destination address", ip, "Port", port)
@@ -32,6 +33,11 @@ func MakeProxy(uds, ip, port string, l *zap.SugaredLogger) {
 		return
 	}
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		srvConn, err := listener.AcceptTCP()
 		if err != nil {
 			logger.Errorw("Error accepting connection on listener", "listener:", listener)

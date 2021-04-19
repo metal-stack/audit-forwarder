@@ -402,7 +402,9 @@ func runForwarder(serviceIP, servicePort string, opts *Opts) {
 		fluentTargetIP := serviceIP
 
 		if opts.KonnectivityUDSSocket != "" {
-			go konnectivityproxy.MakeProxy(opts.KonnectivityUDSSocket, serviceIP, servicePort, logger)
+			ctx, cancel := context.WithCancel(context.Background())
+			go konnectivityproxy.MakeProxy(ctx, opts.KonnectivityUDSSocket, serviceIP, servicePort, logger)
+			defer cancel()
 			fluentTargetIP = "127.0.0.1"
 		}
 
