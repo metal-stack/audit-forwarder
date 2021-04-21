@@ -52,10 +52,9 @@ var (
 	forwarderKilledChan chan struct{}
 	killForwarderChan   chan struct{}
 	forwarderProcess    *os.Process
-	proxyContext        context.Context
-	proxyCancel         context.CancelFunc
 	secretCronID        cron.EntryID
 	serviceCronID       cron.EntryID
+	konnectivityProxy   *konnectivityproxy.Proxy
 )
 
 // CronLogger is used for logging within the cron function.
@@ -364,12 +363,9 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 		if targetService != nil { // This means a service was previously seen, and a forwarder should already be running.
 			logger.Infow("Service went away, killing forwarder")
 			killForwarder()
-			if proxyContext != nil { // If there is a proxyContext this means a konnectivity proxy should be running. We need to stop it by calling its cancel function.
-				if proxyCancel != nil {
-					proxyCancel()
-				}
-				proxyCancel = nil
-				proxyContext = nil
+			if konnectivityProxy != nil { // This means there should be a running proxy, we need to stop it too.
+				konnectivityProxy.DestroyProxy()
+				konnectivityProxy = nil
 			}
 			targetService = nil
 		}
@@ -391,12 +387,9 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 		}
 		// We need to kill the old forwarder
 		killForwarder()
-		if proxyContext != nil { // If there is a proxyContext this means a konnectivity proxy should be running. We need to stop it by calling its cancel function.
-			if proxyCancel != nil {
-				proxyCancel()
-			}
-			proxyCancel = nil
-			proxyContext = nil
+		if konnectivityProxy != nil { // This means there should be a running proxy, we need to stop it too.
+			konnectivityProxy.DestroyProxy()
+			konnectivityProxy = nil
 		}
 	}
 
@@ -409,9 +402,13 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 	logger.Infow("Target identified", "IP", serviceIP, "Port", servicePort)
 	fluentTargetIP := serviceIP
 
-	if opts.KonnectivityUDSSocket != "" { // This means a konnectivity proxy with a UDS socket is running and needs to be used for connection to the audittailer service
-		proxyContext, proxyCancel = context.WithCancel(context.Background())
-		go konnectivityproxy.MakeProxy(proxyContext, opts.KonnectivityUDSSocket, serviceIP, servicePort, logger)
+	if opts.KonnectivityUDSSocket != "" { // This means we need to start a konnectivity proxy
+		logger.Infow("Starting proxy", "uds", opts.KonnectivityUDSSocket)
+		konnectivityProxy, err = konnectivityproxy.NewProxy(logger, opts.KonnectivityUDSSocket, serviceIP, "127.0.0.1", servicePort)
+		if err != nil {
+			logger.Errorw("Could not konnectivity proxy", "error", err)
+			return err
+		}
 		fluentTargetIP = "127.0.0.1"
 	}
 
