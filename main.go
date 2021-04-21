@@ -52,6 +52,8 @@ var (
 	forwarderKilledChan chan struct{}
 	killForwarderChan   chan struct{}
 	forwarderProcess    *os.Process
+	proxyContext        context.Context
+	proxyCancel         context.CancelFunc
 	secretCronID        cron.EntryID
 	serviceCronID       cron.EntryID
 )
@@ -362,7 +364,13 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 		if targetService != nil { // This means a service was previously seen, and a forwarder should already be running.
 			logger.Infow("Service went away, killing forwarder")
 			killForwarder()
-			// also stop uds proxy if we have it
+			if proxyContext != nil { // If there is a proxyContext this means a konnectivity proxy should be running. We need to stop it by calling its cancel function.
+				if proxyCancel != nil {
+					proxyCancel()
+				}
+				proxyCancel = nil
+				proxyContext = nil
+			}
 			targetService = nil
 		}
 		return err
@@ -382,8 +390,14 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 			return nil
 		}
 		// We need to kill the old forwarder
-		// also stop uds proxy if we have it
 		killForwarder()
+		if proxyContext != nil { // If there is a proxyContext this means a konnectivity proxy should be running. We need to stop it by calling its cancel function.
+			if proxyCancel != nil {
+				proxyCancel()
+			}
+			proxyCancel = nil
+			proxyContext = nil
+		}
 	}
 
 	// Check whether the certificates have already been written!
@@ -393,28 +407,22 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 	}
 
 	logger.Infow("Target identified", "IP", serviceIP, "Port", servicePort)
+	fluentTargetIP := serviceIP
 
-	if opts.KonnectivityUDSSocket != "" {
-
-		serviceIP = "127.0.0.1"
+	if opts.KonnectivityUDSSocket != "" { // This means a konnectivity proxy with a UDS socket is running and needs to be used for connection to the audittailer service
+		proxyContext, proxyCancel = context.WithCancel(context.Background())
+		go konnectivityproxy.MakeProxy(proxyContext, opts.KonnectivityUDSSocket, serviceIP, servicePort, logger)
+		fluentTargetIP = "127.0.0.1"
 	}
 
-	go runForwarder(serviceIP, servicePort, opts)
+	go runForwarder(fluentTargetIP, servicePort, opts)
 	targetService = service
 	return nil
 }
 
-func runForwarder(serviceIP, servicePort string, opts *Opts) {
+func runForwarder(fluentTargetIP, servicePort string, opts *Opts) {
 	for {
 		logger.Info("Starting forwarder")
-		fluentTargetIP := serviceIP
-
-		if opts.KonnectivityUDSSocket != "" {
-			ctx, cancel := context.WithCancel(context.Background())
-			go konnectivityproxy.MakeProxy(ctx, opts.KonnectivityUDSSocket, serviceIP, servicePort, logger)
-			defer cancel()
-			fluentTargetIP = "127.0.0.1"
-		}
 
 		var fluentLogLevel zapcore.Level = zap.InfoLevel
 		err := fluentLogLevel.UnmarshalText([]byte(opts.FluentLogLevel))
