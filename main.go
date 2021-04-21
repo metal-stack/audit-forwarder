@@ -362,6 +362,7 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 		if targetService != nil { // This means a service was previously seen, and a forwarder should already be running.
 			logger.Infow("Service went away, killing forwarder")
 			killForwarder()
+			// also stop uds proxy if we have it
 			targetService = nil
 		}
 		return err
@@ -381,6 +382,7 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 			return nil
 		}
 		// We need to kill the old forwarder
+		// also stop uds proxy if we have it
 		killForwarder()
 	}
 
@@ -391,6 +393,12 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 	}
 
 	logger.Infow("Target identified", "IP", serviceIP, "Port", servicePort)
+
+	if opts.KonnectivityUDSSocket != "" {
+
+		serviceIP = "127.0.0.1"
+	}
+
 	go runForwarder(serviceIP, servicePort, opts)
 	targetService = service
 	return nil

@@ -12,8 +12,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"time"
 
 	"go.uber.org/zap"
+)
+
+const (
+	backoffTimer = time.Duration(10 * time.Second)
 )
 
 var (
@@ -27,16 +32,32 @@ func MakeProxy(ctx context.Context, uds, ip, port string, l *zap.SugaredLogger) 
 
 	// Setting up the listener.
 	endpoint, _ := net.ResolveTCPAddr("tcp", net.JoinHostPort("0.0.0.0", port))
-	listener, err := net.ListenTCP("tcp", endpoint)
-	if err != nil {
-		logger.Errorw("Could not open port for listening", "Port:", port)
-		return
+	var listener *net.TCPListener
+	var err error
+	for i := 1; i <= 5; i++ {
+		listener, err = net.ListenTCP("tcp", endpoint)
+		if err == nil {
+			break
+		} else {
+			logger.Errorw("Could not open port for listening", "Port:", port, "try", i, "out of", 5)
+		}
+		time.Sleep(backoffTimer)
+	}
+	if listener == nil {
+		logger.Fatal("Could not open listener for konnectivity proxy, exiting")
 	}
 	defer listener.Close()
 	go listenForConnections(*listener, uds, addr)
 	<-ctx.Done()
 	logger.Infow("Context canceled, exiting", "error", ctx.Err())
 }
+
+/*
+	TODO Figure out how to errorproof listenForConnections:
+	* What should happen if AcceptTCP fails?
+	* How do we pass the stopping of konnectivityProxy on, and do we need to?
+	* Should listenForConnections just be integrated into MakeProxy?
+*/
 
 func listenForConnections(listener net.TCPListener, uds, addr string) {
 	for {
