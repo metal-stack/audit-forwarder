@@ -1,7 +1,8 @@
+# This file adds the auditforwarder.
 - op: add
   path: /spec/containers/1
   value:
-    image: mreiger/audit-forwarder:latest
+    image: ghcr.io/metal-stack/audit-forwarder:pr-rework-proxy
     imagePullPolicy: Always
     name: audit-forwarder
     env:
@@ -9,11 +10,15 @@
       value: "/kube.config"
     - name: AUDIT_LOG_LEVEL
       value: "info"
+    - name: AUDIT_KONNECTIVITY_UDS_SOCKET
+      value: "/konnectivity-uds/konnectivity-server.socket"
     volumeMounts:
     - mountPath: /auditlog
       name: auditlog
     - mountPath: /kube.config
       name: kubeconfig
+    - mountPath: /konnectivity-uds
+      name: konnectivity-uds
     # - mountPath: /fluent-bit/etc/ssl
     #   name: forwarder-certs
 - op: add

@@ -1,4 +1,4 @@
-module github.com/mreiger/audit-forwarder
+module github.com/metal-stack/audit-forwarder
 
 go 1.15
 
