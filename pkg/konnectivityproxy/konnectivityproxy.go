@@ -53,6 +53,7 @@ func (p *Proxy) forward() {
 		srvConn, err := p.listener.AcceptTCP()
 		if err != nil {
 			p.logger.Errorw("Error accepting connection on listener", "listener:", p.listener)
+			return
 		}
 		p.logger.Infow("New connection", "listener", p.listener, "to (listener address)", srvConn.LocalAddr(), "from (client address)", srvConn.RemoteAddr())
 
