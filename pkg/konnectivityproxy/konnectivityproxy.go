@@ -16,22 +16,24 @@ import (
 )
 
 type Proxy struct {
-	logger        *zap.SugaredLogger
-	uds           string
-	destinationIP string
-	listenerIP    string
-	listenerPort  string
-	listener      *net.TCPListener
+	logger          *zap.SugaredLogger
+	uds             string
+	destinationIP   string
+	destinationPort string
+	listenerIP      string
+	listenerPort    string
+	listener        *net.TCPListener
 }
 
 // Creates a new proxy instance and opens a TCP listener for accepting connections.
-func NewProxy(logger *zap.SugaredLogger, uds, destinationIP, listenerIP, listenerPort string) (*Proxy, error) {
+func NewProxy(logger *zap.SugaredLogger, uds, destinationIP, destinationPort, listenerIP, listenerPort string) (*Proxy, error) {
 	proxy := &Proxy{
-		logger:        logger,
-		uds:           uds,
-		destinationIP: destinationIP,
-		listenerIP:    listenerIP,
-		listenerPort:  listenerPort,
+		logger:          logger,
+		uds:             uds,
+		destinationIP:   destinationIP,
+		destinationPort: destinationPort,
+		listenerIP:      listenerIP,
+		listenerPort:    listenerPort,
 	}
 	logger.Infow("NewProxy called", "unix domain socket", uds, "listener IP", listenerIP, "listener port", listenerPort)
 
@@ -70,7 +72,7 @@ func (p *Proxy) handleConnection(srvConn *net.TCPConn) {
 		p.logger.Errorw("dialing proxy failed", "unix domain socket", p.uds, "error", err)
 		return
 	}
-	fmt.Fprintf(proxyConn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\n\r\n", p.destinationIP, p.listenerIP, "auditforwarder")
+	fmt.Fprintf(proxyConn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\n\r\n", net.JoinHostPort(p.destinationIP, p.destinationPort), p.listenerIP, "auditforwarder")
 	br := bufio.NewReader(proxyConn)
 	res, err := http.ReadResponse(br, nil)
 	if err != nil {

@@ -404,7 +404,7 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 
 	if opts.KonnectivityUDSSocket != "" { // This means we need to start a konnectivity proxy
 		logger.Infow("Starting proxy", "uds", opts.KonnectivityUDSSocket)
-		konnectivityProxy, err = konnectivityproxy.NewProxy(logger, opts.KonnectivityUDSSocket, serviceIP, "127.0.0.1", servicePort)
+		konnectivityProxy, err = konnectivityproxy.NewProxy(logger, opts.KonnectivityUDSSocket, serviceIP, servicePort, "127.0.0.1", servicePort)
 		if err != nil {
 			logger.Errorw("Could not konnectivity proxy", "error", err)
 			return err

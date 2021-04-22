@@ -2,7 +2,7 @@
 - op: add
   path: /spec/containers/1
   value:
-    image: ghcr.io/metal-stack/audit-forwarder:pr-use-konnectivity
+    image: ghcr.io/metal-stack/audit-forwarder:pr-rework-proxy
     imagePullPolicy: Always
     name: audit-forwarder
     env:
