@@ -90,6 +90,12 @@ type Opts struct {
 	LogLevel              string
 	FluentLogLevel        string
 	KonnectivityUDSSocket string
+	SplunkHost            string
+	SplunkPort            string
+	SplunkCaFile          string
+	SplunkHECToken        string
+	SplunkIndex           string
+	ClusterName           string
 }
 
 var cmd = &cobra.Command{
@@ -134,6 +140,12 @@ func init() {
 	cmd.Flags().StringP("log-level", "L", "info", "sets the application log level")
 	cmd.Flags().StringP("fluent-log-level", "O", "info", "sets the log level for the fluent-bit command")
 	cmd.Flags().StringP("konnectivity-uds-socket", "u", "", "If set, try and connect through this konnectivity UDS socket. Expected method is http-connect.")
+	cmd.Flags().String("splunk-host", "", "Splunk HEC endpoint to which the audit data should also be sent, in addition to the cluster audittailer")
+	cmd.Flags().String("splunk-port", "8080", "Port on which to contact the splunk HEC endpoint")
+	cmd.Flags().String("splunk-ca-file", "/etc/splunk/splunk_ca.crt", "The absolute path to the CA file for checking the splunk HEC endpoint certificate")
+	cmd.Flags().String("splunk-hec-token", "", "The token to pass to the splunk HEC endpoint")
+	cmd.Flags().String("splunk-index", "", "The index that should receive the log data in splunk")
+	cmd.Flags().String("cluster-name", "", "The cluster name to pass on to the splunk HEC endpoint")
 
 	err = viper.BindPFlags(cmd.Flags())
 	if err != nil {
@@ -158,6 +170,12 @@ func initOpts() (*Opts, error) {
 		LogLevel:              viper.GetString("log-level"),
 		FluentLogLevel:        viper.GetString("fluent-log-level"),
 		KonnectivityUDSSocket: viper.GetString("konnectivity-uds-socket"),
+		SplunkHost:            viper.GetString("splunk-host"),
+		SplunkPort:            viper.GetString("splunk-port"),
+		SplunkCaFile:          viper.GetString("splunk-ca-file"),
+		SplunkHECToken:        viper.GetString("splunk-hec-token"),
+		SplunkIndex:           viper.GetString("splunk-index"),
+		ClusterName:           viper.GetString("cluster-name"),
 	}
 
 	validate := validator.New()
@@ -440,6 +458,10 @@ func runForwarder(fluentTargetIP, servicePort string, opts *Opts) {
 			"TLS_KEY_FILE="+path.Join(opts.TLSBaseDir, opts.TLSKeyFile),
 			"TLS_VHOST="+opts.TLSVhost,
 			"LOG_LEVEL="+fluentLogLevel.String(),
+			"SPLUNK_HOST="+opts.SplunkHost,
+			"SPLUNK_PORT="+opts.SplunkPort,
+			"SPLUNK_HEC_TOKEN="+opts.SplunkHECToken,
+			"SPLUNK_CA_FILE="+opts.SplunkCaFile,
 		)
 		logger.Debugw("Executing:", "Command", strings.Join(cmd.Args, " "), ", Environment:", strings.Join(cmd.Env, ", "))
 
