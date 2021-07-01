@@ -14,8 +14,8 @@
       name: auditlog
     - mountPath: /kube.config
       name: kubeconfig
-    # - mountPath: /fluent-bit/etc/ssl
-    #   name: forwarder-certs
+    - mountPath: /fluent-bit/etc/add
+      name: add-config
 - op: add
   path: /spec/volumes/0
   value:
@@ -23,10 +23,10 @@
       path: /etc/kubernetes/audit/kube.config
       type: File
     name: kubeconfig
-# - op: add
-#   path: /spec/volumes/0
-#   value:
-#     hostPath:
-#       path: /etc/kubernetes/audit/ssl
-#       type: Directory
-#     name: forwarder-certs
+- op: add
+  path: /spec/volumes/0
+  value:
+    hostPath:
+      path: /etc/kubernetes/audit/add
+      type: Directory
+    name: add-config
