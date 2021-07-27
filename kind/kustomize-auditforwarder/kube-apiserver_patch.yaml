@@ -1,7 +1,7 @@
 - op: add
   path: /spec/containers/1
   value:
-    image: ghcr.io/metal-stack/audit-forwarder:pr-add-splunk
+    image: ghcr.io/metal-stack/audit-forwarder:v0.1.4
     imagePullPolicy: Always
     name: audit-forwarder
     env:

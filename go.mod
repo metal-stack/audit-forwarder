@@ -1,6 +1,6 @@
 module github.com/metal-stack/audit-forwarder
 
-go 1.15
+go 1.16
 
 require (
 	github.com/go-playground/universal-translator v0.17.0 // indirect
