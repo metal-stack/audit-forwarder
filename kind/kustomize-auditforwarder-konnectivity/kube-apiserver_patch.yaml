@@ -2,16 +2,18 @@
 - op: add
   path: /spec/containers/1
   value:
-    image: ghcr.io/metal-stack/audit-forwarder:pr-rework-proxy
+    image: ghcr.io/metal-stack/audit-forwarder:pr-update-fluent-bit
     imagePullPolicy: Always
     name: audit-forwarder
     env:
     - name: AUDIT_KUBECFG
       value: "/kube.config"
     - name: AUDIT_LOG_LEVEL
-      value: "info"
+      value: "debug"
     - name: AUDIT_KONNECTIVITY_UDS_SOCKET
       value: "/konnectivity-uds/konnectivity-server.socket"
+    - name: AUDIT_MEM_BUF_LIMIT
+      value: "20M"
     volumeMounts:
     - mountPath: /auditlog
       name: auditlog

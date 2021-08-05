@@ -1,7 +1,7 @@
 - op: add
   path: /spec/containers/1
   value:
-    image: ghcr.io/metal-stack/audit-forwarder:pr-add-splunk
+    image: ghcr.io/metal-stack/audit-forwarder:pr-update-fluent-bit
     imagePullPolicy: Always
     name: audit-forwarder
     env:
@@ -9,6 +9,8 @@
       value: "/kube.config"
     - name: AUDIT_LOG_LEVEL
       value: "info"
+    - name: AUDIT_MEM_BUF_LIMIT
+      value: "200M"
     volumeMounts:
     - mountPath: /auditlog
       name: auditlog

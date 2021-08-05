@@ -35,7 +35,7 @@ release: bin/$(BINARY)
 	&& cd -
 
 dockerimage:
-	docker build -t mreiger/audit-forwarder .
+	docker build -t metal-stack/audit-forwarder .
 
 .PHONY: all
 all:: release;

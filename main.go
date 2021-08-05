@@ -80,6 +80,7 @@ type Opts struct {
 	ServiceName           string
 	SecretName            string
 	AuditLogPath          string
+	MemBufLimit           string
 	TLSBaseDir            string
 	TLSCaFile             string
 	TLSCrtFile            string
@@ -124,6 +125,7 @@ func init() {
 	cmd.Flags().StringP("service-name", "s", "kubernetes-audit-tailer", "the service name of the audit-tailer service")
 	cmd.Flags().StringP("secret-name", "e", "audittailer-client", "the name of the secret containing the CA file, client certificate and key")
 	cmd.Flags().StringP("audit-log-path", "l", "/auditlog/audit.log", "the path to the audit-log file")
+	cmd.Flags().StringP("mem-buf-limit", "m", "200M", "The memory buffer limit for fluent-bit")
 	cmd.Flags().StringP("tls-basedir", "B", "/fluent-bit/etc/ssl", "the path to the directory where the cert and key files should be written")
 	cmd.Flags().StringP("tls-ca-file", "C", "ca.crt", "the filename of the CA file for checking the server (audit-tailer) certificate")
 	cmd.Flags().StringP("tls-crt-file", "R", "audittailer-client.crt", "the filename of the client certificate used to authenticate to the audit-tailer")
@@ -148,6 +150,7 @@ func initOpts() (*Opts, error) {
 		ServiceName:           viper.GetString("service-name"),
 		SecretName:            viper.GetString("secret-name"),
 		AuditLogPath:          viper.GetString("audit-log-path"),
+		MemBufLimit:           viper.GetString("mem-buf-limit"),
 		TLSBaseDir:            viper.GetString("tls-basedir"),
 		TLSCaFile:             viper.GetString("tls-ca-file"),
 		TLSCrtFile:            viper.GetString("tls-crt-file"),
@@ -435,6 +438,7 @@ func runForwarder(fluentTargetIP, servicePort string, opts *Opts) {
 			"AUDIT_TAILER_HOST="+fluentTargetIP,
 			"AUDIT_TAILER_PORT="+servicePort,
 			"AUDIT_LOG_PATH="+opts.AuditLogPath,
+			"MEM_BUF_LIMIT="+opts.MemBufLimit,
 			"TLS_CA_FILE="+path.Join(opts.TLSBaseDir, opts.TLSCaFile),
 			"TLS_CRT_FILE="+path.Join(opts.TLSBaseDir, opts.TLSCrtFile),
 			"TLS_KEY_FILE="+path.Join(opts.TLSBaseDir, opts.TLSKeyFile),
