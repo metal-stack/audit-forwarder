@@ -142,6 +142,7 @@ func (p *Proxy) handleConnection(srvConn *net.TCPConn) {
 		proxyConn, err = tls.Dial("tcp", p.proxyIP+":"+p.proxyPort, &tls.Config{
 			Certificates: []tls.Certificate{p.clientCert},
 			RootCAs:      p.proxyCAPool,
+			MinVersion:   tls.VersionTLS12,
 		})
 		if err != nil {
 			p.logger.Errorw("dialing mTLS proxy failed", "proxy address", p.proxyIP+":"+p.proxyPort, "error", err)
