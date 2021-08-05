@@ -59,7 +59,7 @@ Gardener offers the option to use a [konnectivity](https://github.com/kubernetes
 
 audit-forwarder can use this proxy; you need to mount the UDS socket file into the container and specify it with the `konnectivity-uds-socket` command line option (or corresponding environment variable). The audit-forwarder will open a local port for fluent-bit to use, connect to the audit-tailer service the the konnectivity tunnel and then just forward the data throuth the tunnel.
 
-Creating the kind cluster with konnectivity enabled in a manner similar to what Gardener is doing is a two step process: First execute `./make-kind-cluster_konnectivity` to create the cluster, and make the `kind-etc-kubernetes` subdirectory your own as istructed; then patch the kube-apiserver to use konnectivity with `./make-konnectivity`.
+Creating the kind cluster with konnectivity enabled in a manner similar to what Gardener is doing is a two step process: First execute `./make-kind-cluster_konnectivity` to create the cluster, and make the `kind-etc-kubernetes` subdirectory your own as instructed; then patch the kube-apiserver to use konnectivity with `./make-konnectivity`.
 
 Once you have the cluster, you can activate the audit-forwarder with `./make-audit-forwarder-konnectivity`. And don't forget the audit tailer.
 
