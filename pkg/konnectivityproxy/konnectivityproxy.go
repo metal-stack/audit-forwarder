@@ -26,7 +26,7 @@ import (
 type Proxy struct {
 	logger          *zap.SugaredLogger
 	uds             string
-	proxyIP         string
+	proxyHost       string
 	proxyPort       string
 	clientCert      tls.Certificate
 	proxyCAPool     *x509.CertPool
@@ -58,8 +58,8 @@ func NewProxyUDS(logger *zap.SugaredLogger, uds, destinationIP, destinationPort,
 	return proxy, nil
 }
 
-func NewProxyMTLS(logger *zap.SugaredLogger, proxyIP, proxyPort, clientCertFile, clientKeyFile, proxyCAFile, destinationIP, destinationPort, listenerIP, listenerPort string) (*Proxy, error) {
-	logger.Infow("NewProxyMTLS called", "proxy IP", proxyIP, "proxy port", proxyPort, "listener IP", listenerIP, "listener port", listenerPort)
+func NewProxyMTLS(logger *zap.SugaredLogger, proxyHost, proxyPort, clientCertFile, clientKeyFile, proxyCAFile, destinationIP, destinationPort, listenerIP, listenerPort string) (*Proxy, error) {
+	logger.Infow("NewProxyMTLS called", "proxy host", proxyHost, "proxy port", proxyPort, "listener IP", listenerIP, "listener port", listenerPort)
 	clientCert, err := tls.LoadX509KeyPair(clientCertFile, clientKeyFile)
 	if err != nil {
 		logger.Errorw("Could not read client certificate and key", "client cert", clientCertFile, "client key", clientKeyFile)
@@ -74,7 +74,7 @@ func NewProxyMTLS(logger *zap.SugaredLogger, proxyIP, proxyPort, clientCertFile,
 
 	proxy := &Proxy{
 		logger:          logger,
-		proxyIP:         proxyIP,
+		proxyHost:       proxyHost,
 		proxyPort:       proxyPort,
 		clientCert:      clientCert,
 		proxyCAPool:     proxyCAPool,
@@ -127,8 +127,8 @@ func (p *Proxy) handleConnection(srvConn *net.TCPConn) {
 	p.logger.Infow("handleConnection called", "local address", srvConn.LocalAddr(), "remote address", srvConn.RemoteAddr(), "unix domain socket", p.uds, "target address", p.destinationIP)
 	var proxyConn net.Conn
 	if p.uds != "" {
-		if p.proxyIP != "" {
-			p.logger.Errorw("konnectivityproxy configuration error, both UDS and proxy IP defined. This code should never be reached.", "UDS", p.uds, "proxy IP", p.proxyIP)
+		if p.proxyHost != "" {
+			p.logger.Errorw("konnectivityproxy configuration error, both UDS and proxy host defined. This code should never be reached.", "UDS", p.uds, "proxy host", p.proxyHost)
 			return
 		}
 		var err error
@@ -139,13 +139,13 @@ func (p *Proxy) handleConnection(srvConn *net.TCPConn) {
 		}
 	} else {
 		var err error
-		proxyConn, err = tls.Dial("tcp", p.proxyIP+":"+p.proxyPort, &tls.Config{
+		proxyConn, err = tls.Dial("tcp", p.proxyHost+":"+p.proxyPort, &tls.Config{
 			Certificates: []tls.Certificate{p.clientCert},
 			RootCAs:      p.proxyCAPool,
 			MinVersion:   tls.VersionTLS12,
 		})
 		if err != nil {
-			p.logger.Errorw("dialing mTLS proxy failed", "proxy address", p.proxyIP+":"+p.proxyPort, "error", err)
+			p.logger.Errorw("dialing mTLS proxy failed", "proxy address", p.proxyHost+":"+p.proxyPort, "error", err)
 		}
 	}
 	fmt.Fprintf(proxyConn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\n\r\n", net.JoinHostPort(p.destinationIP, p.destinationPort), p.listenerIP, "auditforwarder")
