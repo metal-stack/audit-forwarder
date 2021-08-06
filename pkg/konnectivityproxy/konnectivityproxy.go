@@ -124,7 +124,7 @@ func (p *Proxy) DestroyProxy() {
 }
 
 func (p *Proxy) handleConnection(srvConn *net.TCPConn) {
-	p.logger.Infow("handleConnection called", "local address", srvConn.LocalAddr(), "remote address", srvConn.RemoteAddr(), "unix domain socket", p.uds, "target address", p.destinationIP)
+	p.logger.Infow("handleConnection called", "local address", srvConn.LocalAddr(), "remote address", srvConn.RemoteAddr(), "unix domain socket", p.uds, "proxy host", p.proxyHost, "proxy port", p.proxyPort, "target address", p.destinationIP)
 	var proxyConn net.Conn
 	if p.uds != "" {
 		if p.proxyHost != "" {
