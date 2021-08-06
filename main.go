@@ -141,7 +141,7 @@ func init() {
 	cmd.Flags().StringP("log-level", "L", "info", "sets the application log level")
 	cmd.Flags().StringP("fluent-log-level", "O", "info", "sets the log level for the fluent-bit command")
 	cmd.Flags().StringP("konnectivity-uds-socket", "u", "", "If set, try and connect through this konnectivity UDS socket. Expected method is http-connect. Mutually exclusive with proxy-host.")
-	cmd.Flags().StringP("proxy-host", "p", "konnectivity-server", "If set, try and connect through this konnectivity mTLS proxy at the given destination. Expected method is http-connect. Mutually exclusive with konectivity-uds-socket.")
+	cmd.Flags().StringP("proxy-host", "p", "", "If set, try and connect through this konnectivity mTLS proxy at the given destination. Expected method is http-connect. Mutually exclusive with konectivity-uds-socket.")
 	cmd.Flags().StringP("proxy-port", "P", "9443", "Port of the konnectivity mTLS proxy specified with proxy-host.")
 	cmd.Flags().String("proxy-ca-file", "/konnectivity-proxy/ca/ca.crt", "the path to the CA file for checking the konnectivity-proxy mTLS server certificate")
 	cmd.Flags().String("proxy-client-crt-file", "/konnectivity-proxy/client/tls.crt", "the path to the proxy client certificate used to authenticate to the konnectivity-proxy mTLS server")
