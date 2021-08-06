@@ -91,6 +91,11 @@ type Opts struct {
 	LogLevel              string
 	FluentLogLevel        string
 	KonnectivityUDSSocket string
+	ProxyHost             string
+	ProxyPort             string
+	ProxyCaFile           string
+	ProxyClientCrtFile    string
+	ProxyClientKeyFile    string
 }
 
 var cmd = &cobra.Command{
@@ -135,7 +140,12 @@ func init() {
 	cmd.Flags().DurationP("backoff-timer", "b", time.Duration(10*time.Second), "Backoff time for restarting the forwarder process when it has been killed by external influences")
 	cmd.Flags().StringP("log-level", "L", "info", "sets the application log level")
 	cmd.Flags().StringP("fluent-log-level", "O", "info", "sets the log level for the fluent-bit command")
-	cmd.Flags().StringP("konnectivity-uds-socket", "u", "", "If set, try and connect through this konnectivity UDS socket. Expected method is http-connect.")
+	cmd.Flags().StringP("konnectivity-uds-socket", "u", "", "If set, try and connect through this konnectivity UDS socket. Expected method is http-connect. Mutually exclusive with proxy-host.")
+	cmd.Flags().StringP("proxy-host", "p", "konnectivity-server", "If set, try and connect through this konnectivity mTLS proxy at the given destination. Expected method is http-connect. Mutually exclusive with konectivity-uds-socket.")
+	cmd.Flags().StringP("proxy-port", "P", "9443", "Port of the konnectivity mTLS proxy specified with proxy-host.")
+	cmd.Flags().String("proxy-ca-file", "/konnectivity-proxy/ca/ca.crt", "the path to the CA file for checking the konnectivity-proxy mTLS server certificate")
+	cmd.Flags().String("proxy-client-crt-file", "/konnectivity-proxy/client/tls.crt", "the path to the proxy client certificate used to authenticate to the konnectivity-proxy mTLS server")
+	cmd.Flags().String("proxy-client-key-file", "/konnectivity-proxy/client/tls.key", "the path to the private key file belonging to the proy client certificate")
 
 	err = viper.BindPFlags(cmd.Flags())
 	if err != nil {
@@ -161,6 +171,11 @@ func initOpts() (*Opts, error) {
 		LogLevel:              viper.GetString("log-level"),
 		FluentLogLevel:        viper.GetString("fluent-log-level"),
 		KonnectivityUDSSocket: viper.GetString("konnectivity-uds-socket"),
+		ProxyHost:             viper.GetString("proxy-host"),
+		ProxyPort:             viper.GetString("proxy-port"),
+		ProxyCaFile:           viper.GetString("proxy-ca-file"),
+		ProxyClientCrtFile:    viper.GetString("proxy-client-crt-file"),
+		ProxyClientKeyFile:    viper.GetString("proxy-client-key-file"),
 	}
 
 	validate := validator.New()
@@ -405,11 +420,23 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 	logger.Infow("Target identified", "IP", serviceIP, "Port", servicePort)
 	fluentTargetIP := serviceIP
 
-	if opts.KonnectivityUDSSocket != "" { // This means we need to start a konnectivity proxy
+	if opts.KonnectivityUDSSocket != "" { // This means we need to start a konnectivity UDS proxy
+		if opts.ProxyHost != "" {
+			logger.Errorw("konnectivityproxy configuration error, both UDS and proxy host defined. This code should never be reached.", "konnectivity-uds-socket", opts.KonnectivityUDSSocket, "proxy-host", opts.ProxyHost)
+			return errors.New("Proxy config error")
+		}
 		logger.Infow("Starting proxy", "uds", opts.KonnectivityUDSSocket)
 		konnectivityProxy, err = konnectivityproxy.NewProxyUDS(logger, opts.KonnectivityUDSSocket, serviceIP, servicePort, "127.0.0.1", servicePort)
 		if err != nil {
-			logger.Errorw("Could not konnectivity proxy", "error", err)
+			logger.Errorw("Could not start UDS proxy", "error", err)
+			return err
+		}
+		fluentTargetIP = "127.0.0.1"
+	} else if opts.ProxyHost != "" { // This means we need to start a konnectivity mTLS proxy
+		logger.Infow("Starting proxy", "host", opts.ProxyHost, "port", opts.ProxyPort)
+		konnectivityProxy, err = konnectivityproxy.NewProxyMTLS(logger, opts.ProxyHost, opts.ProxyPort, opts.ProxyClientCrtFile, opts.ProxyClientKeyFile, opts.ProxyCaFile, serviceIP, servicePort, "127.0.0.1", servicePort)
+		if err != nil {
+			logger.Errorw("Could not start mTLS proxy", "error", err)
 			return err
 		}
 		fluentTargetIP = "127.0.0.1"
