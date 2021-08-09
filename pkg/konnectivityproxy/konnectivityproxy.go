@@ -1,5 +1,6 @@
 /*
-Helper package for opening a http connect proxy connection through a uds socket, and
+Helper package for opening a http connect proxy connection through konnectivity proxy;
+either a uds socket or a mTLS proxy, and
 open a listener and forward connections through the proxy connection.
 
 Connection handling and copying was borrowed from James Bardin's
@@ -11,8 +12,11 @@ package konnectivityproxy
 
 import (
 	"bufio"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 
@@ -22,6 +26,10 @@ import (
 type Proxy struct {
 	logger          *zap.SugaredLogger
 	uds             string
+	proxyHost       string
+	proxyPort       string
+	clientCert      tls.Certificate
+	proxyCAPool     *x509.CertPool
 	destinationIP   string
 	destinationPort string
 	listenerIP      string
@@ -30,7 +38,7 @@ type Proxy struct {
 }
 
 // Creates a new proxy instance and opens a TCP listener for accepting connections.
-func NewProxy(logger *zap.SugaredLogger, uds, destinationIP, destinationPort, listenerIP, listenerPort string) (*Proxy, error) {
+func NewProxyUDS(logger *zap.SugaredLogger, uds, destinationIP, destinationPort, listenerIP, listenerPort string) (*Proxy, error) {
 	proxy := &Proxy{
 		logger:          logger,
 		uds:             uds,
@@ -39,17 +47,61 @@ func NewProxy(logger *zap.SugaredLogger, uds, destinationIP, destinationPort, li
 		listenerIP:      listenerIP,
 		listenerPort:    listenerPort,
 	}
-	logger.Infow("NewProxy called", "unix domain socket", uds, "listener IP", listenerIP, "listener port", listenerPort)
+	logger.Infow("NewProxyUDS called", "unix domain socket", uds, "listener IP", listenerIP, "listener port", listenerPort)
 
-	listenerTCPAddr, _ := net.ResolveTCPAddr("tcp", net.JoinHostPort(listenerIP, listenerPort))
-	var err error
-	proxy.listener, err = net.ListenTCP("tcp", listenerTCPAddr)
+	err := proxy.listen()
 	if err != nil {
-		logger.Errorw("Could not open listener", "listener address", listenerTCPAddr)
+		logger.Errorw("Error opening listener", "proxy", proxy)
 		return nil, err
 	}
 	go proxy.forward()
 	return proxy, nil
+}
+
+func NewProxyMTLS(logger *zap.SugaredLogger, proxyHost, proxyPort, clientCertFile, clientKeyFile, proxyCAFile, destinationIP, destinationPort, listenerIP, listenerPort string) (*Proxy, error) {
+	logger.Infow("NewProxyMTLS called", "proxy host", proxyHost, "proxy port", proxyPort, "listener IP", listenerIP, "listener port", listenerPort)
+	clientCert, err := tls.LoadX509KeyPair(clientCertFile, clientKeyFile)
+	if err != nil {
+		logger.Errorw("Could not read client certificate and key", "client cert", clientCertFile, "client key", clientKeyFile)
+		return nil, err
+	}
+	proxyCAPEM, err := ioutil.ReadFile(proxyCAFile)
+	if err != nil {
+		logger.Errorw("Couldn't load proxy CA file", "proxyCAFile", proxyCAFile)
+	}
+	proxyCAPool := x509.NewCertPool()
+	proxyCAPool.AppendCertsFromPEM(proxyCAPEM)
+
+	proxy := &Proxy{
+		logger:          logger,
+		proxyHost:       proxyHost,
+		proxyPort:       proxyPort,
+		clientCert:      clientCert,
+		proxyCAPool:     proxyCAPool,
+		destinationIP:   destinationIP,
+		destinationPort: destinationPort,
+		listenerIP:      listenerIP,
+		listenerPort:    listenerPort,
+	}
+
+	err = proxy.listen()
+	if err != nil {
+		logger.Errorw("Error opening listener", "proxy", proxy)
+		return nil, err
+	}
+	go proxy.forward()
+	return proxy, nil
+}
+
+func (p *Proxy) listen() error {
+	listenerTCPAddr, _ := net.ResolveTCPAddr("tcp", net.JoinHostPort(p.listenerIP, p.listenerPort))
+	var err error
+	p.listener, err = net.ListenTCP("tcp", listenerTCPAddr)
+	if err != nil {
+		p.logger.Errorw("Could not open listener", "listener address", listenerTCPAddr)
+		return err
+	}
+	return nil
 }
 
 func (p *Proxy) forward() {
@@ -72,11 +124,29 @@ func (p *Proxy) DestroyProxy() {
 }
 
 func (p *Proxy) handleConnection(srvConn *net.TCPConn) {
-	p.logger.Infow("handleConnection called", "local address", srvConn.LocalAddr(), "remote address", srvConn.RemoteAddr(), "unix domain socket", p.uds, "target address", p.destinationIP)
-	proxyConn, err := net.Dial("unix", p.uds)
-	if err != nil {
-		p.logger.Errorw("dialing proxy failed", "unix domain socket", p.uds, "error", err)
-		return
+	p.logger.Infow("handleConnection called", "local address", srvConn.LocalAddr(), "remote address", srvConn.RemoteAddr(), "unix domain socket", p.uds, "proxy host", p.proxyHost, "proxy port", p.proxyPort, "target address", p.destinationIP)
+	var proxyConn net.Conn
+	if p.uds != "" {
+		if p.proxyHost != "" {
+			p.logger.Errorw("konnectivityproxy configuration error, both UDS and proxy host defined. This code should never be reached.", "UDS", p.uds, "proxy host", p.proxyHost)
+			return
+		}
+		var err error
+		proxyConn, err = net.Dial("unix", p.uds)
+		if err != nil {
+			p.logger.Errorw("dialing uds proxy failed", "unix domain socket", p.uds, "error", err)
+			return
+		}
+	} else {
+		var err error
+		proxyConn, err = tls.Dial("tcp", p.proxyHost+":"+p.proxyPort, &tls.Config{
+			Certificates: []tls.Certificate{p.clientCert},
+			RootCAs:      p.proxyCAPool,
+			MinVersion:   tls.VersionTLS12,
+		})
+		if err != nil {
+			p.logger.Errorw("dialing mTLS proxy failed", "proxy address", p.proxyHost+":"+p.proxyPort, "error", err)
+		}
 	}
 	fmt.Fprintf(proxyConn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\n\r\n", net.JoinHostPort(p.destinationIP, p.destinationPort), p.listenerIP, "auditforwarder")
 	br := bufio.NewReader(proxyConn)
