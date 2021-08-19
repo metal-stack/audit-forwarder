@@ -55,13 +55,15 @@ You can implement your own destination by using the right output plugin; you can
 
 ## Using auditforwarder with a konnectivity tunnel
 
-Gardener offers the option to use a [konnectivity](https://github.com/kubernetes-sigs/apiserver-network-proxy) tunnel for the connectivity between apiserver and cluster. The way Gardener uses it, a Unix Domain Socket file acts as proxy endpoint for the kube-apiserver.
+Gardener offers the option to use a [konnectivity](https://github.com/kubernetes-sigs/apiserver-network-proxy) tunnel for the connectivity between apiserver and cluster. The way Gardener uses it (unless the apiserver SNI featureGate is active as well), a Unix Domain Socket file acts as proxy endpoint for the kube-apiserver.
 
 audit-forwarder can use this proxy; you need to mount the UDS socket file into the container and specify it with the `konnectivity-uds-socket` command line option (or corresponding environment variable). The audit-forwarder will open a local port for fluent-bit to use, connect to the audit-tailer service the the konnectivity tunnel and then just forward the data throuth the tunnel.
 
 Creating the kind cluster with konnectivity enabled in a manner similar to what Gardener is doing is a two step process: First execute `./make-kind-cluster_konnectivity` to create the cluster, and make the `kind-etc-kubernetes` subdirectory your own as instructed; then patch the kube-apiserver to use konnectivity with `./make-konnectivity`.
 
 Once you have the cluster, you can activate the audit-forwarder with `./make-audit-forwarder-konnectivity`. And don't forget the audit tailer.
+
+There is no seperate test case for the mTLS proxy; konnectivity has already been removed from current gardener versions so this is very short-lived and not worth the effort to implement.
 
 ## Testing memory limits
 
