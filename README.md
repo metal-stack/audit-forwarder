@@ -9,9 +9,12 @@ This is a small piece of software that is intended to run as sidecar in an out-o
 - There has to be a corresponding `kubernetes-audit-tailer` service and pod in the cluster that receives the audit data and makes it available to a cluster logging solution, e.g. by writing it to its stdout so that it appears as container log
 - We use fluent-bit with the `forward` out plugin as forwarding agent because it is built for the task of reliably forwarding log data. There needs to be a corresponding fluent-bit or fluentd running in the `kubernetes-audit-tailer` pod to receive the data
 
-### Use with konnectivity tunnel (currently only UDS proxy with http-connect)
+### Use with konnectivity tunnel (UDS proxy or mTLS proxy with http-connect)
 
-If connectivity between the apiserver and cluster is with a [konnectivity proxy](https://github.com/kubernetes-sigs/apiserver-network-proxy), auditforwarder can use this if it is a UDS proxy running in another sidecar of the apiserver and if it is a http connect (not GRPC) proxy. Details on how this gets invoked are within the konnectivity test case (see next section).
+If connectivity between the apiserver and cluster is done with a [konnectivity proxy](https://github.com/kubernetes-sigs/apiserver-network-proxy), auditforwarder can use this. There are two variants supported:
+
+- A UDS proxy using the http connect method, running in another sidecar of the apiserver. Details on how this gets invoked are within the konnectivity test case (see next section).
+- A mTLS proxy using http connect, running in a seperate pod from the kube-apiserver. The method to use this is much the same as with the UDS proxy; there are seperate command options to specify the proxy host and port.
 
 ## Testing locally
 
