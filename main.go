@@ -1,8 +1,8 @@
 package main
 
 import (
+	"errors"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"path"
 	"time"
@@ -25,12 +25,10 @@ import (
 	"github.com/metal-stack/audit-forwarder/pkg/konnectivityproxy"
 	"github.com/metal-stack/v"
 
-	"github.com/mitchellh/go-homedir"
-	"github.com/pkg/errors"
+	"github.com/go-playground/validator/v10"
 	"github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"gopkg.in/go-playground/validator.v9"
 )
 
 const (
@@ -118,7 +116,7 @@ var cmd = &cobra.Command{
 }
 
 func init() {
-	homedir, err := homedir.Dir()
+	homedir, err := os.UserHomeDir()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -288,7 +286,7 @@ func run(opts *Opts) error {
 		logger.Debugw("scheduling next secret check", "at", cronjob.Entry(secretCronID).Next)
 	})
 	if err != nil {
-		return errors.Wrap(err, "could not initialize cron schedule")
+		return fmt.Errorf("could not initialize cron schedule %w", err)
 	}
 	serviceCronID, err = cronjob.AddFunc(opts.CheckSchedule, func() {
 		err := checkService(opts, client)
@@ -299,7 +297,7 @@ func run(opts *Opts) error {
 		logger.Debugw("scheduling next service check", "at", cronjob.Entry(serviceCronID).Next)
 	})
 	if err != nil {
-		return errors.Wrap(err, "could not initialize cron schedule")
+		return fmt.Errorf("could not initialize cron schedule %w", err)
 	}
 
 	logger.Infow("start initial checks", "version", v.V.String())
@@ -394,7 +392,7 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 	serviceIP := service.Spec.ClusterIP
 	if len(service.Spec.Ports) != 1 {
 		logger.Errorw("Service must have exactly one port", "Ports", service.Spec.Ports)
-		return errors.Errorf("Service must have exactly one port")
+		return errors.New("Service must have exactly one port")
 	}
 	servicePort := strconv.Itoa(int(service.Spec.Ports[0].Port))
 
@@ -539,7 +537,7 @@ func checkSecret(opts *Opts, client *k8s.Clientset) error {
 		}
 		f := path.Join(opts.TLSBaseDir, k)
 		logger.Debugw("Writing certificate to file", k, f)
-		err := ioutil.WriteFile(f, v, 0600)
+		err := os.WriteFile(f, v, 0600)
 		if err != nil {
 			return fmt.Errorf("could not write secret to certificate base folder:%w", err)
 		}
