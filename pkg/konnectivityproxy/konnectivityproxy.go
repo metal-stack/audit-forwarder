@@ -16,9 +16,9 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
+	"os"
 
 	"go.uber.org/zap"
 )
@@ -65,7 +65,7 @@ func NewProxyMTLS(logger *zap.SugaredLogger, proxyHost, proxyPort, clientCertFil
 		logger.Errorw("Could not read client certificate and key", "client cert", clientCertFile, "client key", clientKeyFile)
 		return nil, err
 	}
-	proxyCAPEM, err := ioutil.ReadFile(proxyCAFile)
+	proxyCAPEM, err := os.ReadFile(proxyCAFile)
 	if err != nil {
 		logger.Errorw("Couldn't load proxy CA file", "proxyCAFile", proxyCAFile)
 	}
