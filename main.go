@@ -141,9 +141,9 @@ func init() {
 	cmd.Flags().StringP("konnectivity-uds-socket", "u", "", "If set, try and connect through this konnectivity UDS socket. Expected method is http-connect. Mutually exclusive with proxy-host.")
 	cmd.Flags().StringP("proxy-host", "p", "", "If set, try and connect through this mTLS proxy at the given destination. Expected method is http-connect. Mutually exclusive with konectivity-uds-socket.")
 	cmd.Flags().StringP("proxy-port", "P", "9443", "Port of the mTLS proxy specified with proxy-host.")
-	cmd.Flags().String("proxy-ca-file", "/konnectivity-proxy/ca/ca.crt", "the path to the CA file for checking the mTLS proxy server certificate")
-	cmd.Flags().String("proxy-client-crt-file", "/konnectivity-proxy/client/tls.crt", "the path to the proxy client certificate used to authenticate to the mTLS proxy server")
-	cmd.Flags().String("proxy-client-key-file", "/konnectivity-proxy/client/tls.key", "the path to the private key file belonging to the proy client certificate")
+	cmd.Flags().String("proxy-ca-file", "/proxy/ca/ca.crt", "the path to the CA file for checking the mTLS proxy server certificate")
+	cmd.Flags().String("proxy-client-crt-file", "/proxy/client/tls.crt", "the path to the proxy client certificate used to authenticate to the mTLS proxy server")
+	cmd.Flags().String("proxy-client-key-file", "/proxy/client/tls.key", "the path to the private key file belonging to the proy client certificate")
 
 	err = viper.BindPFlags(cmd.Flags())
 	if err != nil {
