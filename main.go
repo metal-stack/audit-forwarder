@@ -392,7 +392,7 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 	serviceIP := service.Spec.ClusterIP
 	if len(service.Spec.Ports) != 1 {
 		logger.Errorw("Service must have exactly one port", "Ports", service.Spec.Ports)
-		return errors.New("Service must have exactly one port")
+		return errors.New("service must have exactly one port")
 	}
 	servicePort := strconv.Itoa(int(service.Spec.Ports[0].Port))
 
@@ -421,7 +421,7 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 	if opts.KonnectivityUDSSocket != "" { // This means we need to start a konnectivity UDS proxy
 		if opts.ProxyHost != "" {
 			logger.Errorw("konnectivityproxy configuration error, both UDS and proxy host defined. This code should never be reached.", "konnectivity-uds-socket", opts.KonnectivityUDSSocket, "proxy-host", opts.ProxyHost)
-			return errors.New("Proxy config error")
+			return errors.New("proxy config error")
 		}
 		logger.Infow("Starting proxy", "uds", opts.KonnectivityUDSSocket)
 		clusterProxy, err = proxy.NewProxyUDS(logger, opts.KonnectivityUDSSocket, serviceIP, servicePort, "127.0.0.1", servicePort)
