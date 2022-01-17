@@ -1,5 +1,5 @@
 /*
-Helper package for opening a http connect proxy connection through konnectivity proxy;
+Helper package for opening a http connect proxy connection to tunnel audit data to the cluster;
 either a uds socket or a mTLS proxy, and
 open a listener and forward connections through the proxy connection.
 
@@ -8,7 +8,7 @@ Go TCP Proxy pattern:
 https://gist.github.com/jbardin/821d08cb64c01c84b81a
 */
 
-package konnectivityproxy
+package proxy
 
 import (
 	"bufio"
@@ -16,9 +16,9 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
+	"os"
 
 	"go.uber.org/zap"
 )
@@ -65,7 +65,7 @@ func NewProxyMTLS(logger *zap.SugaredLogger, proxyHost, proxyPort, clientCertFil
 		logger.Errorw("Could not read client certificate and key", "client cert", clientCertFile, "client key", clientKeyFile)
 		return nil, err
 	}
-	proxyCAPEM, err := ioutil.ReadFile(proxyCAFile)
+	proxyCAPEM, err := os.ReadFile(proxyCAFile)
 	if err != nil {
 		logger.Errorw("Couldn't load proxy CA file", "proxyCAFile", proxyCAFile)
 	}
@@ -128,7 +128,7 @@ func (p *Proxy) handleConnection(srvConn *net.TCPConn) {
 	var proxyConn net.Conn
 	if p.uds != "" {
 		if p.proxyHost != "" {
-			p.logger.Errorw("konnectivityproxy configuration error, both UDS and proxy host defined. This code should never be reached.", "UDS", p.uds, "proxy host", p.proxyHost)
+			p.logger.Errorw("proxy configuration error, both UDS and proxy host defined. This code should never be reached.", "UDS", p.uds, "proxy host", p.proxyHost)
 			return
 		}
 		var err error
