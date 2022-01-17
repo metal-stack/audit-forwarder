@@ -22,7 +22,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/metal-stack/audit-forwarder/pkg/konnectivityproxy"
+	"github.com/metal-stack/audit-forwarder/pkg/proxy"
 	"github.com/metal-stack/v"
 
 	"github.com/go-playground/validator/v10"
@@ -52,7 +52,7 @@ var (
 	forwarderProcess    *os.Process
 	secretCronID        cron.EntryID
 	serviceCronID       cron.EntryID
-	konnectivityProxy   *konnectivityproxy.Proxy
+	clusterProxy        *proxy.Proxy
 )
 
 // CronLogger is used for logging within the cron function.
@@ -139,11 +139,11 @@ func init() {
 	cmd.Flags().StringP("log-level", "L", "info", "sets the application log level")
 	cmd.Flags().StringP("fluent-log-level", "O", "info", "sets the log level for the fluent-bit command")
 	cmd.Flags().StringP("konnectivity-uds-socket", "u", "", "If set, try and connect through this konnectivity UDS socket. Expected method is http-connect. Mutually exclusive with proxy-host.")
-	cmd.Flags().StringP("proxy-host", "p", "", "If set, try and connect through this konnectivity mTLS proxy at the given destination. Expected method is http-connect. Mutually exclusive with konectivity-uds-socket.")
-	cmd.Flags().StringP("proxy-port", "P", "9443", "Port of the konnectivity mTLS proxy specified with proxy-host.")
-	cmd.Flags().String("proxy-ca-file", "/konnectivity-proxy/ca/ca.crt", "the path to the CA file for checking the konnectivity-proxy mTLS server certificate")
-	cmd.Flags().String("proxy-client-crt-file", "/konnectivity-proxy/client/tls.crt", "the path to the proxy client certificate used to authenticate to the konnectivity-proxy mTLS server")
-	cmd.Flags().String("proxy-client-key-file", "/konnectivity-proxy/client/tls.key", "the path to the private key file belonging to the proy client certificate")
+	cmd.Flags().StringP("proxy-host", "p", "", "If set, try and connect through this mTLS proxy at the given destination. Expected method is http-connect. Mutually exclusive with konectivity-uds-socket.")
+	cmd.Flags().StringP("proxy-port", "P", "9443", "Port of the mTLS proxy specified with proxy-host.")
+	cmd.Flags().String("proxy-ca-file", "/proxy/ca/ca.crt", "the path to the CA file for checking the mTLS proxy server certificate")
+	cmd.Flags().String("proxy-client-crt-file", "/proxy/client/tls.crt", "the path to the proxy client certificate used to authenticate to the mTLS proxy server")
+	cmd.Flags().String("proxy-client-key-file", "/proxy/client/tls.key", "the path to the private key file belonging to the proy client certificate")
 
 	err = viper.BindPFlags(cmd.Flags())
 	if err != nil {
@@ -379,9 +379,9 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 		if targetService != nil { // This means a service was previously seen, and a forwarder should already be running.
 			logger.Infow("Service went away, killing forwarder")
 			killForwarder()
-			if konnectivityProxy != nil { // This means there should be a running proxy, we need to stop it too.
-				konnectivityProxy.DestroyProxy()
-				konnectivityProxy = nil
+			if clusterProxy != nil { // This means there should be a running proxy, we need to stop it too.
+				clusterProxy.DestroyProxy()
+				clusterProxy = nil
 			}
 			targetService = nil
 		}
@@ -392,7 +392,7 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 	serviceIP := service.Spec.ClusterIP
 	if len(service.Spec.Ports) != 1 {
 		logger.Errorw("Service must have exactly one port", "Ports", service.Spec.Ports)
-		return errors.New("Service must have exactly one port")
+		return errors.New("service must have exactly one port")
 	}
 	servicePort := strconv.Itoa(int(service.Spec.Ports[0].Port))
 
@@ -403,9 +403,9 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 		}
 		// We need to kill the old forwarder
 		killForwarder()
-		if konnectivityProxy != nil { // This means there should be a running proxy, we need to stop it too.
-			konnectivityProxy.DestroyProxy()
-			konnectivityProxy = nil
+		if clusterProxy != nil { // This means there should be a running proxy, we need to stop it too.
+			clusterProxy.DestroyProxy()
+			clusterProxy = nil
 		}
 	}
 
@@ -421,18 +421,18 @@ func checkService(opts *Opts, client *k8s.Clientset) error {
 	if opts.KonnectivityUDSSocket != "" { // This means we need to start a konnectivity UDS proxy
 		if opts.ProxyHost != "" {
 			logger.Errorw("konnectivityproxy configuration error, both UDS and proxy host defined. This code should never be reached.", "konnectivity-uds-socket", opts.KonnectivityUDSSocket, "proxy-host", opts.ProxyHost)
-			return errors.New("Proxy config error")
+			return errors.New("proxy config error")
 		}
 		logger.Infow("Starting proxy", "uds", opts.KonnectivityUDSSocket)
-		konnectivityProxy, err = konnectivityproxy.NewProxyUDS(logger, opts.KonnectivityUDSSocket, serviceIP, servicePort, "127.0.0.1", servicePort)
+		clusterProxy, err = proxy.NewProxyUDS(logger, opts.KonnectivityUDSSocket, serviceIP, servicePort, "127.0.0.1", servicePort)
 		if err != nil {
 			logger.Errorw("Could not start UDS proxy", "error", err)
 			return err
 		}
 		fluentTargetIP = "127.0.0.1"
-	} else if opts.ProxyHost != "" { // This means we need to start a konnectivity mTLS proxy
+	} else if opts.ProxyHost != "" { // This means we need to start a mTLS proxy
 		logger.Infow("Starting proxy", "host", opts.ProxyHost, "port", opts.ProxyPort)
-		konnectivityProxy, err = konnectivityproxy.NewProxyMTLS(logger, opts.ProxyHost, opts.ProxyPort, opts.ProxyClientCrtFile, opts.ProxyClientKeyFile, opts.ProxyCaFile, serviceIP, servicePort, "127.0.0.1", servicePort)
+		clusterProxy, err = proxy.NewProxyMTLS(logger, opts.ProxyHost, opts.ProxyPort, opts.ProxyClientCrtFile, opts.ProxyClientKeyFile, opts.ProxyCaFile, serviceIP, servicePort, "127.0.0.1", servicePort)
 		if err != nil {
 			logger.Errorw("Could not start mTLS proxy", "error", err)
 			return err

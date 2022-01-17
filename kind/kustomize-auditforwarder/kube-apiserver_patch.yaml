@@ -1,7 +1,7 @@
 - op: add
   path: /spec/containers/1
   value:
-    image: ghcr.io/metal-stack/audit-forwarder:pr-update-fluent-bit
+    image: ghcr.io/metal-stack/audit-forwarder:pr-consolidate-proxies
     imagePullPolicy: Always
     name: audit-forwarder
     env:
