@@ -3,7 +3,7 @@ module github.com/metal-stack/audit-forwarder
 go 1.17
 
 require (
-	github.com/go-playground/validator/v10 v10.9.0
+	github.com/go-playground/validator/v10 v10.10.0
 	github.com/imdario/mergo v0.3.12 // indirect
 	github.com/metal-stack/v v1.0.3
 	github.com/robfig/cron/v3 v3.0.1
