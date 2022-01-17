@@ -46,7 +46,7 @@ var (
 	cfgFile             string
 	logger              *zap.SugaredLogger
 	logLevel            zapcore.Level
-	stop                <-chan struct{}
+	stop                context.Context
 	targetService       *apiv1.Service
 	certSecret          *apiv1.Secret
 	forwarderKilledChan chan struct{}
@@ -316,7 +316,7 @@ func run(opts *Opts) error {
 	logger.Infow("cronjob interval", "check-schedule", opts.CheckSchedule)
 	logger.Debugw("Cronjob", "entries:", cronjob.Entries())
 
-	<-stop
+	<-stop.Done()
 	logger.Info("received stop signal, shutting down...")
 
 	cronjob.Stop()
