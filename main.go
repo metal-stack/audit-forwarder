@@ -9,7 +9,7 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	apiv1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	k8s "k8s.io/client-go/kubernetes"
@@ -45,8 +45,8 @@ var (
 	logger              *zap.SugaredLogger
 	logLevel            zapcore.Level
 	stop                context.Context
-	targetService       *apiv1.Service
-	certSecret          *apiv1.Secret
+	targetService       *corev1.Service
+	certSecret          *corev1.Secret
 	forwarderKilledChan chan struct{}
 	killForwarderChan   chan struct{}
 	forwarderProcess    *os.Process
@@ -332,41 +332,41 @@ func loadClient(kubeconfigPath string) (*k8s.Clientset, error) {
 
 // I think this can be implemented much easier with a Watch on the service
 
-/* example from client-go
+/*
+example from client-go
 
-func main() {
-    config, err := clientcmd.BuildConfigFromFlags("", "")
-    if err != nil {
-        glog.Errorln(err)
-    }
-    clientset, err := kubernetes.NewForConfig(config)
-    if err != nil {
-        glog.Errorln(err)
-    }
+	func main() {
+	    config, err := clientcmd.BuildConfigFromFlags("", "")
+	    if err != nil {
+	        glog.Errorln(err)
+	    }
+	    clientset, err := kubernetes.NewForConfig(config)
+	    if err != nil {
+	        glog.Errorln(err)
+	    }
 
-    kubeInformerFactory := kubeinformers.NewSharedInformerFactory(clientset, time.Second*30)
-    svcInformer := kubeInformerFactory.Core().V1().Services().Informer()
+	    kubeInformerFactory := kubeinformers.NewSharedInformerFactory(clientset, time.Second*30)
+	    svcInformer := kubeInformerFactory.Core().V1().Services().Informer()
 
-    svcInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-        AddFunc: func(obj interface{}) {
-            fmt.Printf("service added: %s \n", obj)
-        },
-        DeleteFunc: func(obj interface{}) {
-            fmt.Printf("service deleted: %s \n", obj)
-        },
-        UpdateFunc: func(oldObj, newObj interface{}) {
-            fmt.Printf("service changed: %s \n", newObj)
-        },
-    },)
+	    svcInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	        AddFunc: func(obj interface{}) {
+	            fmt.Printf("service added: %s \n", obj)
+	        },
+	        DeleteFunc: func(obj interface{}) {
+	            fmt.Printf("service deleted: %s \n", obj)
+	        },
+	        UpdateFunc: func(oldObj, newObj interface{}) {
+	            fmt.Printf("service changed: %s \n", newObj)
+	        },
+	    },)
 
-    stop := make(chan struct{})
-    defer close(stop)
-    kubeInformerFactory.Start(stop)
-    for {
-        time.Sleep(time.Second)
-    }
-}
-
+	    stop := make(chan struct{})
+	    defer close(stop)
+	    kubeInformerFactory.Start(stop)
+	    for {
+	        time.Sleep(time.Second)
+	    }
+	}
 */
 func checkService(opts *Opts, client *k8s.Clientset) error {
 	logger.Debugw("Checking service")
@@ -555,4 +555,51 @@ func checkSecret(opts *Opts, client *k8s.Clientset) error {
 	certSecret = secret
 
 	return nil
+}
+
+func GetLatestSecret(ctx context.Context, c *k8s.Clientset, namespace string, name string) (*corev1.Secret, error) {
+	secretList, err := c.CoreV1().Secrets(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s", "name", name),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return getLatestIssuedSecret(secretList.Items)
+}
+
+// getLatestIssuedSecret returns the secret with the "issued-at-time" label that represents the latest point in time
+func getLatestIssuedSecret(secrets []corev1.Secret) (*corev1.Secret, error) {
+	if len(secrets) == 0 {
+		return nil, fmt.Errorf("no secret found")
+	}
+
+	var newestSecret *corev1.Secret
+	var currentIssuedAtTime time.Time
+	for i := 0; i < len(secrets); i++ {
+		// if some of the secrets have no "issued-at-time" label
+		// we have a problem since this is the source of truth
+		issuedAt, ok := secrets[i].Labels["issued-at-time"]
+		if !ok {
+			// there are some old secrets from ancient gardener versions which have to be skipped... (e.g. ssh-keypair.old)
+			continue
+		}
+
+		issuedAtUnix, err := strconv.ParseInt(issuedAt, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+
+		issuedAtTime := time.Unix(issuedAtUnix, 0).UTC()
+		if newestSecret == nil || issuedAtTime.After(currentIssuedAtTime) {
+			newestSecret = &secrets[i]
+			currentIssuedAtTime = issuedAtTime
+		}
+	}
+
+	if newestSecret == nil {
+		return nil, fmt.Errorf("no secret found")
+	}
+
+	return newestSecret, nil
 }
