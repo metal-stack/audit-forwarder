@@ -62,11 +62,11 @@ type CronLogger struct {
 
 // Info logs info messages from the cron function.
 func (c *CronLogger) Info(msg string, keysAndValues ...interface{}) {
-	c.l.Infow(msg, keysAndValues)
+	c.l.Infow(msg, keysAndValues...)
 }
 
 func (c *CronLogger) Error(err error, msg string, keysAndValues ...interface{}) {
-	c.l.Errorw(msg, keysAndValues)
+	c.l.Errorw(msg, keysAndValues...)
 }
 
 // Opts is required in order to have proper validation for args from cobra and viper.
