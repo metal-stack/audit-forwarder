@@ -516,7 +516,7 @@ func checkSecret(opts *Opts, client *k8s.Clientset) error {
 
 	kubectx, kubecancel := context.WithTimeout(context.Background(), time.Duration(10*time.Second))
 	defer kubecancel()
-	secret, err := GetLatestSecret(kubectx, client, opts.NameSpace, opts.SecretName)
+	secret, err := getLatestSecret(kubectx, client, opts.NameSpace, opts.SecretName)
 
 	// TODO: backward compability, remove in the future
 	if err != nil { // That means no matching secret provided by secretsmanager found, try old way
@@ -563,7 +563,7 @@ func checkSecret(opts *Opts, client *k8s.Clientset) error {
 	return nil
 }
 
-func GetLatestSecret(ctx context.Context, c *k8s.Clientset, namespace string, name string) (*corev1.Secret, error) {
+func getLatestSecret(ctx context.Context, c *k8s.Clientset, namespace string, name string) (*corev1.Secret, error) {
 	secretList, err := c.CoreV1().Secrets(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("%s=%s", "name", name),
 	})
