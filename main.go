@@ -517,6 +517,12 @@ func checkSecret(opts *Opts, client *k8s.Clientset) error {
 	kubectx, kubecancel := context.WithTimeout(context.Background(), time.Duration(10*time.Second))
 	defer kubecancel()
 	secret, err := GetLatestSecret(kubectx, client, opts.NameSpace, opts.SecretName)
+
+	// TODO: backward compability, remove in the future
+	if err != nil { // That means no matching secret provided by secretsmanager found, try old way
+		secret, err = client.CoreV1().Secrets(opts.NameSpace).Get(kubectx, opts.SecretName, metav1.GetOptions{})
+	}
+
 	if err != nil { // That means no matching secret found. No need to do anything - we write a new secret when one becomes available.
 		return err
 	}
