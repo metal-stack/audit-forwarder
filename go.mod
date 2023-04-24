@@ -5,6 +5,7 @@ go 1.20
 require (
 	github.com/go-playground/validator/v10 v10.12.0
 	github.com/imdario/mergo v0.3.15 // indirect
+	github.com/metal-stack/gardener-extension-provider-metal v0.20.3-0.20230424123445-d4ff73d62076
 	github.com/metal-stack/v v1.0.3
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.7.0
@@ -12,7 +13,7 @@ require (
 	go.uber.org/zap v1.24.0
 	k8s.io/api v0.27.1
 	k8s.io/apimachinery v0.27.1
-	k8s.io/client-go v0.27.1
+	k8s.io/client-go v11.0.1-0.20190409021438-1a26190bd76a+incompatible
 	sigs.k8s.io/controller-runtime v0.14.6
 )
 
@@ -71,3 +72,5 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.2.3 // indirect
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
+
+replace k8s.io/client-go => k8s.io/client-go v0.27.1
