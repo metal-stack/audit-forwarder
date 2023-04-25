@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	github.com/go-playground/validator/v10 v10.12.0
-	github.com/metal-stack/gardener-extension-provider-metal v0.20.3-0.20230424123445-d4ff73d62076
+	github.com/metal-stack/gardener-extension-provider-metal v0.20.3-0.20230424150843-16f6300787f7
 	github.com/metal-stack/v v1.0.3
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.7.0
