@@ -9,7 +9,7 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	apiv1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	k8s "k8s.io/client-go/kubernetes"
@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/metal-stack/audit-forwarder/pkg/proxy"
+	"github.com/metal-stack/gardener-extension-provider-metal/pkg/secret"
 	"github.com/metal-stack/v"
 
 	"github.com/go-playground/validator/v10"
@@ -45,8 +46,8 @@ var (
 	logger              *zap.SugaredLogger
 	logLevel            zapcore.Level
 	stop                context.Context
-	targetService       *apiv1.Service
-	certSecret          *apiv1.Secret
+	targetService       *corev1.Service
+	certSecret          *corev1.Secret
 	forwarderKilledChan chan struct{}
 	killForwarderChan   chan struct{}
 	forwarderProcess    *os.Process
@@ -62,11 +63,11 @@ type CronLogger struct {
 
 // Info logs info messages from the cron function.
 func (c *CronLogger) Info(msg string, keysAndValues ...interface{}) {
-	c.l.Infow(msg, keysAndValues)
+	c.l.Infow(msg, keysAndValues...)
 }
 
 func (c *CronLogger) Error(err error, msg string, keysAndValues ...interface{}) {
-	c.l.Errorw(msg, keysAndValues)
+	c.l.Errorw(msg, keysAndValues...)
 }
 
 // Opts is required in order to have proper validation for args from cobra and viper.
@@ -332,41 +333,41 @@ func loadClient(kubeconfigPath string) (*k8s.Clientset, error) {
 
 // I think this can be implemented much easier with a Watch on the service
 
-/* example from client-go
+/*
+example from client-go
 
-func main() {
-    config, err := clientcmd.BuildConfigFromFlags("", "")
-    if err != nil {
-        glog.Errorln(err)
-    }
-    clientset, err := kubernetes.NewForConfig(config)
-    if err != nil {
-        glog.Errorln(err)
-    }
+	func main() {
+	    config, err := clientcmd.BuildConfigFromFlags("", "")
+	    if err != nil {
+	        glog.Errorln(err)
+	    }
+	    clientset, err := kubernetes.NewForConfig(config)
+	    if err != nil {
+	        glog.Errorln(err)
+	    }
 
-    kubeInformerFactory := kubeinformers.NewSharedInformerFactory(clientset, time.Second*30)
-    svcInformer := kubeInformerFactory.Core().V1().Services().Informer()
+	    kubeInformerFactory := kubeinformers.NewSharedInformerFactory(clientset, time.Second*30)
+	    svcInformer := kubeInformerFactory.Core().V1().Services().Informer()
 
-    svcInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-        AddFunc: func(obj interface{}) {
-            fmt.Printf("service added: %s \n", obj)
-        },
-        DeleteFunc: func(obj interface{}) {
-            fmt.Printf("service deleted: %s \n", obj)
-        },
-        UpdateFunc: func(oldObj, newObj interface{}) {
-            fmt.Printf("service changed: %s \n", newObj)
-        },
-    },)
+	    svcInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	        AddFunc: func(obj interface{}) {
+	            fmt.Printf("service added: %s \n", obj)
+	        },
+	        DeleteFunc: func(obj interface{}) {
+	            fmt.Printf("service deleted: %s \n", obj)
+	        },
+	        UpdateFunc: func(oldObj, newObj interface{}) {
+	            fmt.Printf("service changed: %s \n", newObj)
+	        },
+	    },)
 
-    stop := make(chan struct{})
-    defer close(stop)
-    kubeInformerFactory.Start(stop)
-    for {
-        time.Sleep(time.Second)
-    }
-}
-
+	    stop := make(chan struct{})
+	    defer close(stop)
+	    kubeInformerFactory.Start(stop)
+	    for {
+	        time.Sleep(time.Second)
+	    }
+	}
 */
 func checkService(opts *Opts, client *k8s.Clientset) error {
 	logger.Debugw("Checking service")
@@ -516,7 +517,13 @@ func checkSecret(opts *Opts, client *k8s.Clientset) error {
 
 	kubectx, kubecancel := context.WithTimeout(context.Background(), time.Duration(10*time.Second))
 	defer kubecancel()
-	secret, err := client.CoreV1().Secrets(opts.NameSpace).Get(kubectx, opts.SecretName, metav1.GetOptions{})
+	secret, err := getLatestSecret(kubectx, client, opts.NameSpace, opts.SecretName)
+
+	// TODO: backward compability, remove in the future
+	if err != nil { // That means no matching secret provided by secretsmanager found, try old way
+		secret, err = client.CoreV1().Secrets(opts.NameSpace).Get(kubectx, opts.SecretName, metav1.GetOptions{})
+	}
+
 	if err != nil { // That means no matching secret found. No need to do anything - we write a new secret when one becomes available.
 		return err
 	}
@@ -555,4 +562,15 @@ func checkSecret(opts *Opts, client *k8s.Clientset) error {
 	certSecret = secret
 
 	return nil
+}
+
+func getLatestSecret(ctx context.Context, c *k8s.Clientset, namespace string, name string) (*corev1.Secret, error) {
+	secretList, err := c.CoreV1().Secrets(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s", "name", name),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return secret.GetLatestIssuedSecret(secretList.Items)
 }
