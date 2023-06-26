@@ -13,4 +13,5 @@ COPY fluent-bit.conf /fluent-bit/etc/
 COPY parsers.conf /fluent-bit/etc/
 COPY null.conf /fluent-bit/etc/add/
 
+ENTRYPOINT ["/fluent-bit/bin/audit-forwarder"]
 CMD ["/fluent-bit/bin/audit-forwarder"]
