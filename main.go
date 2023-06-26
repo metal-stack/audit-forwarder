@@ -23,7 +23,6 @@ import (
 	"strings"
 
 	"github.com/metal-stack/audit-forwarder/pkg/proxy"
-	"github.com/metal-stack/gardener-extension-provider-metal/pkg/secret"
 	"github.com/metal-stack/v"
 
 	"github.com/go-playground/validator/v10"
@@ -517,15 +516,10 @@ func checkSecret(opts *Opts, client *k8s.Clientset) error {
 
 	kubectx, kubecancel := context.WithTimeout(context.Background(), time.Duration(10*time.Second))
 	defer kubecancel()
-	secret, err := getLatestSecret(kubectx, client, opts.NameSpace, opts.SecretName)
 
-	// TODO: backward compability, remove in the future
-	if err != nil { // That means no matching secret provided by secretsmanager found, try old way
-		secret, err = client.CoreV1().Secrets(opts.NameSpace).Get(kubectx, opts.SecretName, metav1.GetOptions{})
-	}
-
-	if err != nil { // That means no matching secret found. No need to do anything - we write a new secret when one becomes available.
-		return err
+	secret, err := client.CoreV1().Secrets(opts.NameSpace).Get(kubectx, opts.SecretName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("did not find client secret %q in namespace %s: %w", opts.SecretName, opts.NameSpace, err)
 	}
 	logger.Debugw("Got secret", opts.SecretName, secret.Name)
 
@@ -562,15 +556,4 @@ func checkSecret(opts *Opts, client *k8s.Clientset) error {
 	certSecret = secret
 
 	return nil
-}
-
-func getLatestSecret(ctx context.Context, c *k8s.Clientset, namespace string, name string) (*corev1.Secret, error) {
-	secretList, err := c.CoreV1().Secrets(namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("%s=%s", "name", name),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return secret.GetLatestIssuedSecret(secretList.Items)
 }
