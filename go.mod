@@ -1,6 +1,6 @@
 module github.com/metal-stack/audit-forwarder
 
-go 1.20
+go 1.21
 
 require (
 	github.com/go-playground/validator/v10 v10.12.0

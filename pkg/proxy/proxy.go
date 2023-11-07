@@ -25,7 +25,6 @@ import (
 
 type Proxy struct {
 	logger          *zap.SugaredLogger
-	uds             string
 	proxyHost       string
 	proxyPort       string
 	clientCert      tls.Certificate
@@ -38,26 +37,6 @@ type Proxy struct {
 }
 
 // Creates a new proxy instance and opens a TCP listener for accepting connections.
-func NewProxyUDS(logger *zap.SugaredLogger, uds, destinationIP, destinationPort, listenerIP, listenerPort string) (*Proxy, error) {
-	proxy := &Proxy{
-		logger:          logger,
-		uds:             uds,
-		destinationIP:   destinationIP,
-		destinationPort: destinationPort,
-		listenerIP:      listenerIP,
-		listenerPort:    listenerPort,
-	}
-	logger.Infow("NewProxyUDS called", "unix domain socket", uds, "listener IP", listenerIP, "listener port", listenerPort)
-
-	err := proxy.listen()
-	if err != nil {
-		logger.Errorw("Error opening listener", "proxy", proxy)
-		return nil, err
-	}
-	go proxy.forward()
-	return proxy, nil
-}
-
 func NewProxyMTLS(logger *zap.SugaredLogger, proxyHost, proxyPort, clientCertFile, clientKeyFile, proxyCAFile, destinationIP, destinationPort, listenerIP, listenerPort string) (*Proxy, error) {
 	logger.Infow("NewProxyMTLS called", "proxy host", proxyHost, "proxy port", proxyPort, "listener IP", listenerIP, "listener port", listenerPort)
 	clientCert, err := tls.LoadX509KeyPair(clientCertFile, clientKeyFile)
@@ -119,46 +98,33 @@ func (p *Proxy) forward() {
 
 // Closes the listener.
 func (p *Proxy) DestroyProxy() {
-	p.logger.Infow("Closing forwarder", "uds", p.uds, "destination ip", p.destinationIP)
+	p.logger.Infow("Closing forwarder", "destination ip", p.destinationIP)
 	p.listener.Close()
 }
 
 func (p *Proxy) handleConnection(srvConn *net.TCPConn) {
-	p.logger.Infow("handleConnection called", "local address", srvConn.LocalAddr(), "remote address", srvConn.RemoteAddr(), "unix domain socket", p.uds, "proxy host", p.proxyHost, "proxy port", p.proxyPort, "target address", p.destinationIP)
+	p.logger.Infow("handleConnection called", "local address", srvConn.LocalAddr(), "remote address", srvConn.RemoteAddr(), "proxy host", p.proxyHost, "proxy port", p.proxyPort, "target address", p.destinationIP)
 	var proxyConn net.Conn
-	if p.uds != "" {
-		if p.proxyHost != "" {
-			p.logger.Errorw("proxy configuration error, both UDS and proxy host defined. This code should never be reached.", "UDS", p.uds, "proxy host", p.proxyHost)
-			return
-		}
-		var err error
-		proxyConn, err = net.Dial("unix", p.uds)
-		if err != nil {
-			p.logger.Errorw("dialing uds proxy failed", "unix domain socket", p.uds, "error", err)
-			return
-		}
-	} else {
-		var err error
-		proxyConn, err = tls.Dial("tcp", p.proxyHost+":"+p.proxyPort, &tls.Config{
-			Certificates: []tls.Certificate{p.clientCert},
-			RootCAs:      p.proxyCAPool,
-			MinVersion:   tls.VersionTLS12,
-		})
-		if err != nil {
-			p.logger.Errorw("dialing mTLS proxy failed", "proxy address", p.proxyHost+":"+p.proxyPort, "error", err)
-		}
+	var err error
+	proxyConn, err = tls.Dial("tcp", p.proxyHost+":"+p.proxyPort, &tls.Config{
+		Certificates: []tls.Certificate{p.clientCert},
+		RootCAs:      p.proxyCAPool,
+		MinVersion:   tls.VersionTLS12,
+	})
+	if err != nil {
+		p.logger.Errorw("dialing mTLS proxy failed", "proxy address", p.proxyHost+":"+p.proxyPort, "error", err)
 	}
 	fmt.Fprintf(proxyConn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\n\r\n", net.JoinHostPort(p.destinationIP, p.destinationPort), p.listenerIP, "auditforwarder")
 	br := bufio.NewReader(proxyConn)
 	res, err := http.ReadResponse(br, nil)
 	if err != nil {
-		p.logger.Errorf("reading HTTP response from CONNECT to %s via uds proxy %s failed: %v", p.destinationIP, p.uds, err)
+		p.logger.Errorf("reading HTTP response from CONNECT to %s failed: %v", p.destinationIP, err)
 		return
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode != 200 {
-		p.logger.Errorf("proxy error from %s while dialing %s: %v", p.uds, p.destinationIP, res.Status)
+		p.logger.Errorf("proxy error while dialing %s: %v", p.destinationIP, res.Status)
 		return
 	}
 	// It's safe to discard the bufio.Reader here and return the
@@ -166,7 +132,7 @@ func (p *Proxy) handleConnection(srvConn *net.TCPConn) {
 	// TLS, and in TLS the client speaks first, so we know there's
 	// no unbuffered data. But we can double-check.
 	if br.Buffered() > 0 {
-		p.logger.Errorf("unexpected %d bytes of buffered data from CONNECT uds proxy %q", br.Buffered(), p.uds)
+		p.logger.Errorf("unexpected %d bytes of buffered data from CONNECT", br.Buffered())
 		return
 	}
 	// Now we're supposed to have both connections open.
