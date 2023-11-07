@@ -1,4 +1,4 @@
-FROM golang:1.20 AS builder
+FROM golang:1.21 AS builder
 
 WORKDIR /work
 
@@ -6,12 +6,9 @@ COPY .git Makefile go.* *.go /work/
 COPY pkg/ /work/pkg/
 RUN make bin/audit-forwarder
 
-FROM fluent/fluent-bit:1.9.10
+FROM debian:bullseye-20231030-slim
 
-COPY --from=builder /work/bin/audit-forwarder /fluent-bit/bin/
-COPY fluent-bit.conf /fluent-bit/etc/
-COPY parsers.conf /fluent-bit/etc/
-COPY null.conf /fluent-bit/etc/add/
+COPY --from=builder /work/bin/audit-forwarder /
 
-ENTRYPOINT ["/fluent-bit/bin/audit-forwarder"]
-CMD ["/fluent-bit/bin/audit-forwarder"]
+ENTRYPOINT ["/audit-forwarder"]
+CMD ["/audit-forwarder"]
